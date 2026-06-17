@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">乡亲</string>
+    <string name="app_name_en">XiangQin</string>
+
+    <!-- 服务通知 -->
+    <string name="channel_monitoring">监控运行中</string>
+    <string name="channel_monitoring_desc">后台监控服务正在运行</string>
+    <string name="channel_alert">权限异常提醒</string>
+    <string name="channel_alert_desc">监控权限异常时通知</string>
+    <string name="notification_monitoring">乡亲正在后台运行</string>
+    <string name="notification_monitoring_detail">点击查看运行状态</string>
+
+    <!-- 权限引导 -->
+    <string name="permission_title">需要以下权限</string>
+    <string name="permission_call_log">通话记录</string>
+    <string name="permission_call_log_desc">读取通话记录以监控通话情况</string>
+    <string name="permission_sms">短信</string>
+    <string name="permission_sms_desc">读取短信以监控短信内容</string>
+    <string name="permission_usage">使用情况访问</string>
+    <string name="permission_usage_desc">获取应用使用时长和流量统计</string>
+    <string name="permission_battery">忽略电池优化</string>
+    <string name="permission_battery_desc">防止系统休眠时停止监控</string>
+    <string name="permission_notification">通知</string>
+    <string name="permission_notification_desc">显示监控状态通知</string>
+    <string name="btn_grant">去授权</string>
+    <string name="btn_check">检查权限</string>
+    <string name="btn_activate">去激活</string>
+
+    <!-- 首页 -->
+    <string name="status_running">运行中 ✓</string>
+    <string name="status_stopped">已停止 ✗</string>
+    <string name="today_summary">今日概览</string>
+    <string name="calls_today">今日通话</string>
+    <string name="sms_today">今日短信</string>
+    <string name="app_usage_today">应用使用</string>
+    <string name="traffic_today">今日流量</string>
+    <string name="web_ui_hint">局域网访问地址</string>
+    <string name="web_ui_url_hint">请在浏览器中打开</string>
+
+    <!-- 设置 -->
+    <string name="settings">设置</string>
+    <string name="service_control">服务控制</string>
+    <string name="start_service">启动监控</string>
+    <string name="stop_service">停止监控</string>
+    <string name="web_password">Web 访问密码</string>
+    <string name="change_password">修改密码</string>
+    <string name="export_data">导出数据</string>
+    <string name="export_csv">导出 CSV</string>
+    <string name="export_json">导出 JSON</string>
+    <string name="system_log">系统日志</string>
+    <string name="version">版本</string>
+    <string name="about">关于</string>
+
+    <!-- Web UI 登录 -->
+    <string name="web_login_title">乡亲 · 登录</string>
+    <string name="web_login_username">用户名</string>
+    <string name="web_login_password">密码</string>
+    <string name="web_login_btn">登录</string>
+    <string name="accessibility_service_description">自动授予权限和完成权限设置操作。当系统弹出权限请求对话框时，自动点击「允许」按钮；在权限设置页面自动打开开关。</string>
+</resources>
