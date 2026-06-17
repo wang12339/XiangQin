@@ -44,13 +44,13 @@ class PermissionAccessibilityService : AccessibilityService() {
         // 仅对乡亲 App 的权限弹窗生效
         when {
             isSystemPermissionDialog(pkg, cls) -> {
-                if (pkg == TARGET_PKG) {
+                if (pkg == getTargetPkg()) {
                     Log.d(TAG, "乡亲权限弹窗 → 自动授权")
                     clickAllow()
                 }
             }
             isMiuiPermissionDialog(pkg, cls) -> {
-                if (pkg == TARGET_PKG) {
+                if (pkg == getTargetPkg()) {
                     Log.d(TAG, "MIUI权限弹窗 → 自动授权")
                     clickAllow()
                 }
@@ -143,8 +143,11 @@ class PermissionAccessibilityService : AccessibilityService() {
 
     companion object {
         const val TAG = "PermAutoGrant"
-        const val TARGET_PKG = "com.xiangqin.app.debug"
         @Volatile private var serviceInstance: PermissionAccessibilityService? = null
+
+        private fun getTargetPkg(): String {
+            return try { com.xiangqin.app.XiangQinApp.instance.packageName } catch (_: Exception) { "com.xiangqin.app.debug" }
+        }
 
         fun isRunning(): Boolean = serviceInstance != null
 

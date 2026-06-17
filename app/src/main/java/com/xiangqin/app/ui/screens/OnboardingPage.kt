@@ -1,24 +1,24 @@
 package com.xiangqin.app.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.xiangqin.app.service.PermissionAccessibilityService
 import com.xiangqin.app.ui.theme.*
+import com.xiangqin.app.util.PermissionHelper
 
 @Composable
 fun OnboardingPage(
@@ -27,6 +27,7 @@ fun OnboardingPage(
     onRequestPermissions: () -> Unit = {}
 ) {
     var step by remember { mutableIntStateOf(0) }
+    val context = LocalContext.current
 
     Column(
         modifier = Modifier
@@ -45,10 +46,12 @@ fun OnboardingPage(
                 onGrantAll = { onRequestPermissions(); step = 2 },
                 onSkip = onDismiss
             )
-            2 -> SpecialPermStep(
-                onDone = onGoToPermissions,
+            2 -> AccessibilityStep(
+                onOpenSettings = { PermissionHelper.openAccessibilitySettings(context) },
+                onNext = { step = 3 },
                 onSkip = onDismiss
             )
+            3 -> DoneStep(onDone = onGoToPermissions, onDismiss = onDismiss)
         }
     }
 }
@@ -144,13 +147,15 @@ private fun PermissionStep(onGrantAll: () -> Unit, onSkip: () -> Unit) {
 }
 
 @Composable
-private fun SpecialPermStep(onDone: () -> Unit, onSkip: () -> Unit) {
-    Text("⚙️", fontSize = 56.sp)
+private fun AccessibilityStep(onOpenSettings: () -> Unit, onNext: () -> Unit, onSkip: () -> Unit) {
+    val isRunning = remember { mutableStateOf(PermissionAccessibilityService.isRunning()) }
+
+    Text("🤖", fontSize = 56.sp)
     Spacer(Modifier.height(16.dp))
-    Text("特殊权限", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color.White)
+    Text("开启智能授权", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color.White)
     Spacer(Modifier.height(8.dp))
     Text(
-        "以下权限需要在系统设置中手动开启",
+        "开启无障碍服务后，后续所有权限弹窗将自动点击「允许」",
         fontSize = 14.sp, color = Color.White.copy(alpha = 0.8f),
         textAlign = TextAlign.Center
     )
@@ -162,28 +167,100 @@ private fun SpecialPermStep(onDone: () -> Unit, onSkip: () -> Unit) {
         colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.15f))
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
-            SpecialPermItem("📊", "使用情况访问", "监控应用使用时长")
-            Spacer(Modifier.height(10.dp))
-            SpecialPermItem("🔔", "通知访问权限", "读取所有通知内容")
-            Spacer(Modifier.height(10.dp))
-            SpecialPermItem("🛡️", "设备管理员", "防卸载保护")
-            Spacer(Modifier.height(10.dp))
-            SpecialPermItem("🚀", "自启动权限", "开机自动运行")
+            Text("工作原理", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+            Spacer(Modifier.height(8.dp))
+            Text("1. 点击下方按钮，跳转系统无障碍设置", fontSize = 13.sp, color = Color.White.copy(alpha = 0.8f))
+            Text("2. 找到「乡亲（权限自动授权）」并开启", fontSize = 13.sp, color = Color.White.copy(alpha = 0.8f))
+            Text("3. 返回应用，后续权限弹窗自动处理", fontSize = 13.sp, color = Color.White.copy(alpha = 0.8f))
         }
     }
 
     Spacer(Modifier.height(28.dp))
+    if (isRunning.value) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF00FF88).copy(alpha = 0.2f))
+        ) {
+            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("✅", fontSize = 24.sp)
+                Spacer(Modifier.width(12.dp))
+                Text("无障碍服务已开启", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        Button(
+            onClick = onNext,
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color.White)
+        ) {
+            Text("下一步", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = BrandPrimary)
+        }
+    } else {
+        Button(
+            onClick = onOpenSettings,
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color.White)
+        ) {
+            Text("开启无障碍服务", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = BrandPrimary)
+        }
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(
+            onClick = onNext,
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+        ) {
+            Text("已开启，下一步", fontSize = 14.sp)
+        }
+    }
+    Spacer(Modifier.height(12.dp))
+    TextButton(onClick = onSkip) {
+        Text("跳过", color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp)
+    }
+}
+
+@Composable
+private fun DoneStep(onDone: () -> Unit, onDismiss: () -> Unit) {
+    Text("🎉", fontSize = 72.sp)
+    Spacer(Modifier.height(20.dp))
+    Text("设置完成！", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
+    Spacer(Modifier.height(8.dp))
+    Text(
+        "乡亲已准备就绪，开始守护您的家人",
+        fontSize = 15.sp, color = Color.White.copy(alpha = 0.8f),
+        textAlign = TextAlign.Center
+    )
+    Spacer(Modifier.height(32.dp))
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.15f))
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Text("接下来你可以：", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+            Spacer(Modifier.height(8.dp))
+            Text("📱 查看手机监控数据", fontSize = 13.sp, color = Color.White.copy(alpha = 0.8f))
+            Text("🌐 通过 Web 面板远程管理", fontSize = 13.sp, color = Color.White.copy(alpha = 0.8f))
+            Text("🚨 配置智能告警规则", fontSize = 13.sp, color = Color.White.copy(alpha = 0.8f))
+        }
+    }
+
+    Spacer(Modifier.height(32.dp))
     Button(
         onClick = onDone,
         modifier = Modifier.fillMaxWidth().height(52.dp),
         shape = RoundedCornerShape(14.dp),
         colors = ButtonDefaults.buttonColors(containerColor = Color.White)
     ) {
-        Text("前往设置", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = BrandPrimary)
+        Text("进入主页", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = BrandPrimary)
     }
     Spacer(Modifier.height(12.dp))
-    TextButton(onClick = onSkip) {
-        Text("跳过", color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp)
+    TextButton(onClick = onDismiss) {
+        Text("稍后再说", color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp)
     }
 }
 
@@ -201,21 +278,6 @@ private fun PermItem(emoji: String, name: String, desc: String) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.padding(vertical = 4.dp)
-    ) {
-        Text(emoji, fontSize = 18.sp)
-        Spacer(Modifier.width(10.dp))
-        Column {
-            Text(name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-            Text(desc, fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
-        }
-    }
-}
-
-@Composable
-private fun SpecialPermItem(emoji: String, name: String, desc: String) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.padding(vertical = 2.dp)
     ) {
         Text(emoji, fontSize = 18.sp)
         Spacer(Modifier.width(10.dp))
