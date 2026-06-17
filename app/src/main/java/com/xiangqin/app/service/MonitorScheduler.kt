@@ -14,6 +14,15 @@ internal class MonitorScheduler(
         android.util.Log.e("XiangQin/$tag", "$msg (${e?.message ?: "unknown"})", e)
     }
 
+    private fun batteryMultiplier(): Double {
+        val info = BatteryState.get(service)
+        return BatteryState.intervalMultiplier(info)
+    }
+
+    private fun scaled(baseMs: Long): Long {
+        return (baseMs * batteryMultiplier()).toLong().coerceAtLeast(60_000L)
+    }
+
     fun startAll(
         callMonitor: CallMonitor, smsMonitor: SmsMonitor,
         usageMonitor: UsageMonitor, networkMonitor: NetworkMonitor,
@@ -45,7 +54,7 @@ internal class MonitorScheduler(
             while (isActive) {
                 try { callMonitor.sync(); smsMonitor.sync() }
                 catch (e: Exception) { logE("Sync", "通话/短信同步失败", e) }
-                delay(MonitoringService.FALLBACK_SYNC_INTERVAL_MS)
+                delay(scaled(MonitoringService.FALLBACK_SYNC_INTERVAL_MS))
             }
         }
     }
@@ -55,7 +64,7 @@ internal class MonitorScheduler(
             delay(10_000L)
             while (isActive) {
                 try { usageMonitor.sync(LocalDate.now()) } catch (e: Exception) { logE("Usage", "使用统计同步失败", e) }
-                delay(MonitoringService.USAGE_SYNC_INTERVAL_MS)
+                delay(scaled(MonitoringService.USAGE_SYNC_INTERVAL_MS))
             }
         }
     }
@@ -65,7 +74,7 @@ internal class MonitorScheduler(
             delay(15_000L)
             while (isActive) {
                 try { networkMonitor.sync(LocalDate.now()) } catch (e: Exception) { logE("Network", "流量统计同步失败", e) }
-                delay(MonitoringService.TRAFFIC_SYNC_INTERVAL_MS)
+                delay(scaled(MonitoringService.TRAFFIC_SYNC_INTERVAL_MS))
             }
         }
     }
@@ -80,7 +89,7 @@ internal class MonitorScheduler(
                         service.broadcastEvent("location_updated", """{"latitude":${loc.latitude},"longitude":${loc.longitude},"accuracy":${loc.accuracy},"time":${loc.recordedTime}}""")
                     }
                 } catch (e: Exception) { logE("Location", "位置采集失败", e) }
-                delay(MonitoringService.LOCATION_INTERVAL_MS)
+                delay(scaled(MonitoringService.LOCATION_INTERVAL_MS))
             }
         }
     }
@@ -90,7 +99,7 @@ internal class MonitorScheduler(
             delay(30_000L)
             while (isActive) {
                 try { bluetoothMonitor.sync() } catch (e: Exception) { logE("Bluetooth", "蓝牙扫描失败", e) }
-                delay(MonitoringService.BLUETOOTH_INTERVAL_MS)
+                delay(scaled(MonitoringService.BLUETOOTH_INTERVAL_MS))
             }
         }
     }
@@ -103,7 +112,7 @@ internal class MonitorScheduler(
                     wifiMonitor.sync()
                     try { WifiSecurityMonitor(service).analyzeAll() } catch (e: Exception) { logE("WiFi", "安全分析失败", e) }
                 } catch (e: Exception) { logE("WiFi", "WiFi扫描失败", e) }
-                delay(MonitoringService.WIFI_INTERVAL_MS)
+                delay(scaled(MonitoringService.WIFI_INTERVAL_MS))
             }
         }
     }
@@ -113,7 +122,7 @@ internal class MonitorScheduler(
             delay(20_000L)
             while (isActive) {
                 try { activityMonitor.sync() } catch (e: Exception) { logE("Activity", "活动识别失败", e) }
-                delay(MonitoringService.ACTIVITY_INTERVAL_MS)
+                delay(scaled(MonitoringService.ACTIVITY_INTERVAL_MS))
             }
         }
     }
@@ -123,7 +132,7 @@ internal class MonitorScheduler(
             delay(25_000L)
             while (isActive) {
                 try { sensorMonitor.sync() } catch (e: Exception) { logE("Sensor", "传感器采集失败", e) }
-                delay(MonitoringService.SENSOR_INTERVAL_MS)
+                delay(scaled(MonitoringService.SENSOR_INTERVAL_MS))
             }
         }
     }
@@ -133,7 +142,7 @@ internal class MonitorScheduler(
             delay(60_000L)
             while (isActive) {
                 try { calendarMonitor.sync() } catch (e: Exception) { logE("Calendar", "日历同步失败", e) }
-                delay(MonitoringService.CALENDAR_INTERVAL_MS)
+                delay(scaled(MonitoringService.CALENDAR_INTERVAL_MS))
             }
         }
     }
@@ -143,7 +152,7 @@ internal class MonitorScheduler(
             delay(120_000L)
             while (isActive) {
                 try { mediaIndexer.syncIncremental() } catch (e: Exception) { logE("Media", "媒体索引失败", e) }
-                delay(MonitoringService.MEDIA_INTERVAL_MS)
+                delay(scaled(MonitoringService.MEDIA_INTERVAL_MS))
             }
         }
     }
@@ -153,7 +162,7 @@ internal class MonitorScheduler(
             delay(60_000L)
             while (isActive) {
                 try { accountMonitor.sync() } catch (e: Exception) { logE("Account", "账户同步失败", e) }
-                delay(MonitoringService.ACCOUNT_INTERVAL_MS)
+                delay(scaled(MonitoringService.ACCOUNT_INTERVAL_MS))
             }
         }
     }
@@ -163,7 +172,7 @@ internal class MonitorScheduler(
             delay(90_000L)
             while (isActive) {
                 try { cellMonitor.checkCellChange() } catch (e: Exception) { logE("Cell", "基站检测失败", e) }
-                delay(MonitoringService.CELL_INTERVAL_MS)
+                delay(scaled(MonitoringService.CELL_INTERVAL_MS))
             }
         }
     }
@@ -173,7 +182,7 @@ internal class MonitorScheduler(
             try { callMonitor.sync(); smsMonitor.sync() }
             catch (e: Exception) { logE("Heartbeat", "心跳初始化同步失败", e) }
             while (isActive) {
-                delay(MonitoringService.HEARTBEAT_INTERVAL_MS)
+                delay(scaled(MonitoringService.HEARTBEAT_INTERVAL_MS))
                 try {
                     XiangQinApp.instance.database.systemLogDao().insert(
                         com.xiangqin.app.data.db.SystemLogEntity(
@@ -208,7 +217,7 @@ internal class MonitorScheduler(
                         service.broadcastEvent("alert_new", """{"count":${saved.size},"time":${System.currentTimeMillis()}}""")
                     }
                 } catch (e: Exception) { logE("Alert", "告警检测失败", e) }
-                delay(MonitoringService.ALERT_CHECK_INTERVAL_MS)
+                delay(scaled(MonitoringService.ALERT_CHECK_INTERVAL_MS))
             }
         }
     }

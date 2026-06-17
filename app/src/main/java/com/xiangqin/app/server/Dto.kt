@@ -160,3 +160,9 @@ data class DashboardStatsResponse(
     val alertToday: Int, val notificationCount: Int,
     val contactCount: Int, val isRecording: Boolean
 )
+
+@Serializable
+data class BatteryInfoResponse(
+    val level: Int, val isCharging: Boolean,
+    val pluggedType: Int, val intervalMultiplier: Double
+)

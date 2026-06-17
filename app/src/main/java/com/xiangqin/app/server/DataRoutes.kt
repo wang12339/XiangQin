@@ -89,6 +89,15 @@ internal fun Route.dataRoutes(app: XiangQinApp, context: Context, auth: AuthModu
     get("/api/health") {
         call.respondText("""{"status":"ok","time":${System.currentTimeMillis()}}""", ContentType.Application.Json)
     }
+    get("/api/battery") {
+        if (!auth.checkAuth(call)) return@get
+        val info = com.xiangqin.app.service.BatteryState.get(context)
+        val multiplier = com.xiangqin.app.service.BatteryState.intervalMultiplier(info)
+        call.respond(BatteryInfoResponse(
+            level = info.level, isCharging = info.isCharging,
+            pluggedType = info.pluggedType, intervalMultiplier = multiplier
+        ))
+    }
     get("/api/speedtest") {
         val size = call.request.queryParameters["size"]?.toIntOrNull() ?: 102400
         val data = ByteArray(minOf(size, 1048576))
