@@ -51,7 +51,7 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
     post("/api/media/cleanup") {
         if (!auth.checkAuth(call)) return@post
         try {
-            val before = app.database.mediaFileDao().getAll().size
+            val before = app.database.mediaFileDao().count()
             app.database.mediaFileDao().deleteAll()
             val indexer = com.xiangqin.app.monitor.MediaIndexer(context)
             indexer.sync()

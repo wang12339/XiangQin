@@ -6,8 +6,8 @@ import org.junit.Test
 class DatabaseMigrationsTest {
 
     @Test
-    fun `ALL_MIGRATIONS contains 4 migration entries`() {
-        assertEquals(4, DatabaseMigrations.ALL_MIGRATIONS.size)
+    fun `ALL_MIGRATIONS contains 5 migration entries`() {
+        assertEquals(5, DatabaseMigrations.ALL_MIGRATIONS.size)
     }
 
     @Test
@@ -35,9 +35,15 @@ class DatabaseMigrationsTest {
     }
 
     @Test
+    fun `MIGRATION_5_6 has correct version range`() {
+        assertEquals(5, DatabaseMigrations.MIGRATION_5_6.startVersion)
+        assertEquals(6, DatabaseMigrations.MIGRATION_5_6.endVersion)
+    }
+
+    @Test
     fun `migrations are sequential without gaps`() {
         val versions = DatabaseMigrations.ALL_MIGRATIONS.map { it.startVersion }.toMutableList()
         versions.add(DatabaseMigrations.ALL_MIGRATIONS.last().endVersion)
-        assertEquals(listOf(1, 2, 3, 4, 5), versions)
+        assertEquals(listOf(1, 2, 3, 4, 5, 6), versions)
     }
 }

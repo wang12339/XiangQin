@@ -1,11 +1,12 @@
 package com.xiangqin.app.data.db
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import kotlinx.serialization.Serializable
 
 @Serializable
-@Entity(tableName = "calls")
+@Entity(tableName = "calls", indices = [Index("callTime"), Index("phoneNumber")])
 data class CallEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -18,7 +19,7 @@ data class CallEntity(
 )
 
 @Serializable
-@Entity(tableName = "sms")
+@Entity(tableName = "sms", indices = [Index("receivedTime"), Index("phoneNumber")])
 data class SmsEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -32,7 +33,7 @@ data class SmsEntity(
 )
 
 @Serializable
-@Entity(tableName = "app_usage")
+@Entity(tableName = "app_usage", indices = [Index("usageDate")])
 data class AppUsageEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -44,7 +45,7 @@ data class AppUsageEntity(
 )
 
 @Serializable
-@Entity(tableName = "traffic_stats")
+@Entity(tableName = "traffic_stats", indices = [Index("statsDate")])
 data class TrafficEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -56,7 +57,7 @@ data class TrafficEntity(
 )
 
 @Serializable
-@Entity(tableName = "system_logs")
+@Entity(tableName = "system_logs", indices = [Index("createdTime")])
 data class SystemLogEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -69,7 +70,7 @@ data class SystemLogEntity(
 
 /** 📍 位置轨迹 */
 @Serializable
-@Entity(tableName = "locations")
+@Entity(tableName = "locations", indices = [Index("recordedTime")])
 data class LocationEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -85,7 +86,7 @@ data class LocationEntity(
 
 /** 📡 蓝牙设备 */
 @Serializable
-@Entity(tableName = "bluetooth_devices")
+@Entity(tableName = "bluetooth_devices", indices = [Index("lastSeen"), Index("deviceAddress")])
 data class BluetoothDeviceEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -100,7 +101,7 @@ data class BluetoothDeviceEntity(
 
 /** 📶 WiFi 热点 */
 @Serializable
-@Entity(tableName = "wifi_networks")
+@Entity(tableName = "wifi_networks", indices = [Index("lastSeen"), Index("bssid")])
 data class WifiNetworkEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -119,7 +120,7 @@ data class WifiNetworkEntity(
 
 /** 🏃 活动识别 */
 @Serializable
-@Entity(tableName = "activity_records")
+@Entity(tableName = "activity_records", indices = [Index("recordedTime")])
 data class ActivityEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -130,7 +131,7 @@ data class ActivityEntity(
 
 /** 💪 传感器数据 */
 @Serializable
-@Entity(tableName = "sensor_data")
+@Entity(tableName = "sensor_data", indices = [Index("recordedTime"), Index("sensorType")])
 data class SensorEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -141,7 +142,7 @@ data class SensorEntity(
 
 /** 📅 日历事件 */
 @Serializable
-@Entity(tableName = "calendar_events")
+@Entity(tableName = "calendar_events", indices = [Index("startTime"), Index("syncId")])
 data class CalendarEventEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -157,7 +158,7 @@ data class CalendarEventEntity(
 
 /** 🖼️ 媒体文件索引 */
 @Serializable
-@Entity(tableName = "media_files")
+@Entity(tableName = "media_files", indices = [Index("dateAdded"), Index("mediaType"), Index("filePath")])
 data class MediaFileEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -175,7 +176,7 @@ data class MediaFileEntity(
 
 /** 📋 账户信息 */
 @Serializable
-@Entity(tableName = "accounts")
+@Entity(tableName = "accounts", indices = [Index("lastSeen"), Index(value = ["accountName", "accountType"], unique = true)])
 data class AccountEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -187,7 +188,7 @@ data class AccountEntity(
 
 /** 📸 远程拍照记录 */
 @Serializable
-@Entity(tableName = "photos")
+@Entity(tableName = "photos", indices = [Index("takenTime")])
 data class PhotoEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -200,7 +201,7 @@ data class PhotoEntity(
 
 /** 🎤 远程录音记录 */
 @Serializable
-@Entity(tableName = "audio_recordings")
+@Entity(tableName = "audio_recordings", indices = [Index("recordedTime")])
 data class AudioRecordingEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,

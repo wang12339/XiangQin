@@ -91,5 +91,40 @@ object DatabaseMigrations {
         }
     }
 
-    val ALL_MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+    val MIGRATION_5_6 = object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // 添加索引优化查询性能
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_calls_callTime` ON `calls` (`callTime`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_calls_phoneNumber` ON `calls` (`phoneNumber`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_sms_receivedTime` ON `sms` (`receivedTime`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_sms_phoneNumber` ON `sms` (`phoneNumber`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_app_usage_usageDate` ON `app_usage` (`usageDate`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_traffic_stats_statsDate` ON `traffic_stats` (`statsDate`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_system_logs_createdTime` ON `system_logs` (`createdTime`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_locations_recordedTime` ON `locations` (`recordedTime`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_bluetooth_devices_lastSeen` ON `bluetooth_devices` (`lastSeen`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_bluetooth_devices_deviceAddress` ON `bluetooth_devices` (`deviceAddress`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_wifi_networks_lastSeen` ON `wifi_networks` (`lastSeen`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_wifi_networks_bssid` ON `wifi_networks` (`bssid`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_activity_records_recordedTime` ON `activity_records` (`recordedTime`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_sensor_data_recordedTime` ON `sensor_data` (`recordedTime`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_sensor_data_sensorType` ON `sensor_data` (`sensorType`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_calendar_events_startTime` ON `calendar_events` (`startTime`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_calendar_events_syncId` ON `calendar_events` (`syncId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_media_files_dateAdded` ON `media_files` (`dateAdded`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_media_files_mediaType` ON `media_files` (`mediaType`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_media_files_filePath` ON `media_files` (`filePath`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_accounts_lastSeen` ON `accounts` (`lastSeen`)")
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_accounts_accountName_accountType` ON `accounts` (`accountName`, `accountType`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_photos_takenTime` ON `photos` (`takenTime`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_audio_recordings_recordedTime` ON `audio_recordings` (`recordedTime`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_alerts_triggeredTime` ON `alerts` (`triggeredTime`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_alerts_type` ON `alerts` (`type`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_alerts_pushed` ON `alerts` (`pushed`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_notifications_postTime` ON `notifications` (`postTime`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_notifications_packageName` ON `notifications` (`packageName`)")
+        }
+    }
+
+    val ALL_MIGRATIONS = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
 }

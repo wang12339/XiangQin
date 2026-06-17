@@ -19,7 +19,7 @@ import java.security.MessageDigest
         PhotoEntity::class, AudioRecordingEntity::class,
         AlertEntity::class, NotificationEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {

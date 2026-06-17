@@ -216,13 +216,13 @@ internal fun Route.dataRoutes(app: XiangQinApp, context: Context, auth: AuthModu
             val todayStart = today.atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
             val now = System.currentTimeMillis()
             val loc = app.database.locationDao().getLastLocation()
-            val btCount = app.database.bluetoothDeviceDao().getAll().size
-            val wifiCount = app.database.wifiNetworkDao().getAll().size
+            val btCount = app.database.bluetoothDeviceDao().count()
+            val wifiCount = app.database.wifiNetworkDao().count()
             val activity = app.database.activityDao().getRecent(1).firstOrNull()
-            val photoCount = app.database.photoDao().getRecent(1000).size
-            val audioCount = app.database.audioRecordingDao().getRecent(1000).size
+            val photoCount = app.database.photoDao().count()
+            val audioCount = app.database.audioRecordingDao().count()
             val alertCount = app.database.alertDao().countSince(todayStart)
-            val notifCount = app.database.notificationDao().getRecent(10000).size
+            val notifCount = app.database.notificationDao().count()
             val contactCount = try {
                 val cursor = context.contentResolver.query(
                     android.provider.ContactsContract.Contacts.CONTENT_URI, arrayOf("_id"), null, null, null

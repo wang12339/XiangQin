@@ -126,7 +126,7 @@ class MainActivity : ComponentActivity() {
                         val todayEnd = todayStart + 86_400_000L
                         callCount = app.database.callDao().countByDate(todayStart, todayEnd)
                         smsCount = app.database.smsDao().countByDate(todayStart, todayEnd)
-                        locationCount = app.database.locationDao().getRecent(10000).size
+                        locationCount = app.database.locationDao().count()
                     } catch (e: Exception) { android.util.Log.e("XiangQin", "统计查询失败", e) }
                 }
                 kotlinx.coroutines.delay(3_000L)

@@ -25,6 +25,9 @@ interface CallDao {
 
     @Query("DELETE FROM calls WHERE callTime < :before")
     suspend fun deleteOlderThan(before: Long)
+
+    @Query("SELECT COUNT(*) FROM calls")
+    suspend fun count(): Int
 }
 
 @Dao
@@ -46,6 +49,9 @@ interface SmsDao {
 
     @Query("DELETE FROM sms WHERE receivedTime < :before")
     suspend fun deleteOlderThan(before: Long)
+
+    @Query("SELECT COUNT(*) FROM sms")
+    suspend fun count(): Int
 }
 
 @Dao
@@ -120,6 +126,9 @@ interface LocationDao {
 
     @Query("SELECT * FROM locations ORDER BY recordedTime DESC LIMIT 1")
     suspend fun getLastLocation(): LocationEntity?
+
+    @Query("SELECT COUNT(*) FROM locations")
+    suspend fun count(): Int
 }
 
 // ====================== 📡 蓝牙 ======================
@@ -143,6 +152,9 @@ interface BluetoothDeviceDao {
 
     @Query("DELETE FROM bluetooth_devices WHERE lastSeen < :before")
     suspend fun deleteOlderThan(before: Long)
+
+    @Query("SELECT COUNT(*) FROM bluetooth_devices")
+    suspend fun count(): Int
 }
 
 // ====================== 📶 WiFi ======================
@@ -166,6 +178,9 @@ interface WifiNetworkDao {
 
     @Query("DELETE FROM wifi_networks WHERE lastSeen < :before")
     suspend fun deleteOlderThan(before: Long)
+
+    @Query("SELECT COUNT(*) FROM wifi_networks")
+    suspend fun count(): Int
 }
 
 // ====================== 🏃 活动 ======================
@@ -261,6 +276,9 @@ interface MediaFileDao {
 
     @Query("SELECT * FROM media_files WHERE filePath = :path")
     suspend fun getAllByPath(path: String): List<MediaFileEntity>
+
+    @Query("SELECT COUNT(*) FROM media_files")
+    suspend fun count(): Int
 }
 
 // ====================== 📋 账户 ======================
@@ -298,6 +316,9 @@ interface PhotoDao {
 
     @Query("DELETE FROM photos WHERE takenTime < :before")
     suspend fun deleteOlderThan(before: Long)
+
+    @Query("SELECT COUNT(*) FROM photos")
+    suspend fun count(): Int
 }
 
 // ====================== 🎤 录音 ======================
@@ -312,6 +333,9 @@ interface AudioRecordingDao {
 
     @Query("DELETE FROM audio_recordings WHERE recordedTime < :before")
     suspend fun deleteOlderThan(before: Long)
+
+    @Query("SELECT COUNT(*) FROM audio_recordings")
+    suspend fun count(): Int
 }
 
 // ====================== 🚨 告警 ======================

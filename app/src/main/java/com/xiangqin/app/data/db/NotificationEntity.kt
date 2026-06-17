@@ -1,12 +1,12 @@
 package com.xiangqin.app.data.db
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import kotlinx.serialization.Serializable
 
-/** 🔔 通知记录 */
 @Serializable
-@Entity(tableName = "notifications")
+@Entity(tableName = "notifications", indices = [Index("postTime"), Index("packageName")])
 data class NotificationEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,

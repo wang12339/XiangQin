@@ -1,22 +1,12 @@
 package com.xiangqin.app.data.db
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import kotlinx.serialization.Serializable
 
-/**
- * 🚨 告警记录
- *
- * 存储所有触发的异常告警，包括告警类型、详细信息、触发时间和推送状态。
- * 告警类型（type）:
- *   - late_night_leave     深夜离开常驻区域
- *   - low_battery          低电量未充电
- *   - no_heartbeat         长时间无心跳（可能关机/服务被杀）
- *   - off_hour_call        凌晨通话
- *   - device_boot          设备重启
- */
 @Serializable
-@Entity(tableName = "alerts")
+@Entity(tableName = "alerts", indices = [Index("triggeredTime"), Index("type"), Index("pushed")])
 data class AlertEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
