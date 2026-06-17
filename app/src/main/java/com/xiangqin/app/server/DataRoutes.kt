@@ -161,7 +161,7 @@ internal fun Route.dataRoutes(app: XiangQinApp, context: Context, auth: AuthModu
         try {
             val wifiNetworks = app.database.wifiNetworkDao().getAll()
             val btDevices = app.database.bluetoothDeviceDao().getAll()
-            call.respondText(jsonMap("wifiNetworks" to wifiNetworks, "bluetoothDevices" to btDevices), ContentType.Application.Json)
+            call.respond(NetworkOverviewResponse(wifiNetworks, btDevices))
         } catch (e: Exception) {
             call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
         }

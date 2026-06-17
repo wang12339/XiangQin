@@ -166,3 +166,9 @@ data class BatteryInfoResponse(
     val level: Int, val isCharging: Boolean,
     val pluggedType: Int, val intervalMultiplier: Double
 )
+
+@Serializable
+data class NetworkOverviewResponse(
+    val wifiNetworks: List<WifiNetworkEntity>,
+    val bluetoothDevices: List<BluetoothDeviceEntity>
+)
