@@ -7,6 +7,8 @@ import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.Serializable
 
 internal fun Route.dataRoutes(app: XiangQinApp, context: Context, auth: AuthModule) {
@@ -45,20 +47,32 @@ internal fun Route.dataRoutes(app: XiangQinApp, context: Context, auth: AuthModu
         val todayStart = java.time.LocalDate.now().atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
         val todayEnd = todayStart + 86400000L
         val ip = getLocalIpAddress()
-        call.respond(StatsSummary(
-            date = today,
-            callCount = app.database.callDao().countByDate(todayStart, todayEnd),
-            smsCount = app.database.smsDao().countByDate(todayStart, todayEnd),
-            totalRx = app.database.trafficDao().getTotalByDate(today)?.rx ?: 0,
-            totalTx = app.database.trafficDao().getTotalByDate(today)?.tx ?: 0,
-            latestCalls = app.database.callDao().getCalls(limit = 10),
-            latestSms = app.database.smsDao().getSms(limit = 10),
-            serviceUptime = MonitoringService.serviceUptime,
-            locationCount = app.database.locationDao().getRecent(limit = 10000).size,
-            alertToday = app.database.alertDao().countSince(todayStart),
-            localIp = ip,
-            port = 8080
-        ))
+        val result = coroutineScope {
+            // 并行查询
+            val callCountD = async { app.database.callDao().countByDate(todayStart, todayEnd) }
+            val smsCountD = async { app.database.smsDao().countByDate(todayStart, todayEnd) }
+            val trafficD = async { app.database.trafficDao().getTotalByDate(today) }
+            val latestCallsD = async { app.database.callDao().getCalls(limit = 10) }
+            val latestSmsD = async { app.database.smsDao().getSms(limit = 10) }
+            val locationCountD = async { app.database.locationDao().count() }
+            val alertTodayD = async { app.database.alertDao().countSince(todayStart) }
+            val traffic = trafficD.await()
+            StatsSummary(
+                date = today,
+                callCount = callCountD.await(),
+                smsCount = smsCountD.await(),
+                totalRx = traffic?.rx ?: 0,
+                totalTx = traffic?.tx ?: 0,
+                latestCalls = latestCallsD.await(),
+                latestSms = latestSmsD.await(),
+                serviceUptime = MonitoringService.serviceUptime,
+                locationCount = locationCountD.await(),
+                alertToday = alertTodayD.await(),
+                localIp = ip,
+                port = 8080
+            )
+        }
+        call.respond(result)
     }
     get("/api/stats/daily") {
         if (!auth.checkAuth(call)) return@get
@@ -224,33 +238,41 @@ internal fun Route.dataRoutes(app: XiangQinApp, context: Context, auth: AuthModu
             val today = java.time.LocalDate.now()
             val todayStart = today.atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
             val now = System.currentTimeMillis()
-            val loc = app.database.locationDao().getLastLocation()
-            val btCount = app.database.bluetoothDeviceDao().count()
-            val wifiCount = app.database.wifiNetworkDao().count()
-            val activity = app.database.activityDao().getRecent(1).firstOrNull()
-            val photoCount = app.database.photoDao().count()
-            val audioCount = app.database.audioRecordingDao().count()
-            val alertCount = app.database.alertDao().countSince(todayStart)
-            val notifCount = app.database.notificationDao().count()
-            val contactCount = try {
-                val cursor = context.contentResolver.query(
-                    android.provider.ContactsContract.Contacts.CONTENT_URI, arrayOf("_id"), null, null, null
+            val result = coroutineScope {
+                val locDeferred = async { app.database.locationDao().getLastLocation() }
+                val btCountDeferred = async { app.database.bluetoothDeviceDao().count() }
+                val wifiCountDeferred = async { app.database.wifiNetworkDao().count() }
+                val activityDeferred = async { app.database.activityDao().getRecent(1).firstOrNull() }
+                val photoCountDeferred = async { app.database.photoDao().count() }
+                val audioCountDeferred = async { app.database.audioRecordingDao().count() }
+                val alertCountDeferred = async { app.database.alertDao().countSince(todayStart) }
+                val notifCountDeferred = async { app.database.notificationDao().count() }
+                val callsTodayDeferred = async { app.database.callDao().countByDate(todayStart, now) }
+                val smsTodayDeferred = async { app.database.smsDao().countByDate(todayStart, now) }
+                val contactCountDeferred = async {
+                    try {
+                        val cursor = context.contentResolver.query(
+                            android.provider.ContactsContract.Contacts.CONTENT_URI, arrayOf("_id"), null, null, null
+                        )
+                        val count = cursor?.count ?: 0; cursor?.close(); count
+                    } catch (_: Exception) { 0 }
+                }
+                DashboardStatsResponse(
+                    callsToday = callsTodayDeferred.await(),
+                    smsToday = smsTodayDeferred.await(),
+                    lastLocation = locDeferred.await(),
+                    bluetoothDeviceCount = btCountDeferred.await(),
+                    wifiNetworkCount = wifiCountDeferred.await(),
+                    currentActivity = activityDeferred.await()?.activityType,
+                    photoCount = photoCountDeferred.await(),
+                    audioRecordingCount = audioCountDeferred.await(),
+                    alertToday = alertCountDeferred.await(),
+                    notificationCount = notifCountDeferred.await(),
+                    contactCount = contactCountDeferred.await(),
+                    isRecording = false
                 )
-                val count = cursor?.count ?: 0
-                cursor?.close()
-                count
-            } catch (_: Exception) { 0 }
-            val actStr = activity?.activityType ?: "unknown"
-            call.respond(DashboardStatsResponse(
-                callsToday = app.database.callDao().countByDate(todayStart, now),
-                smsToday = app.database.smsDao().countByDate(todayStart, now),
-                lastLocation = loc,
-                bluetoothDeviceCount = btCount, wifiNetworkCount = wifiCount,
-                currentActivity = actStr,
-                photoCount = photoCount, audioRecordingCount = audioCount,
-                alertToday = alertCount, notificationCount = notifCount,
-                contactCount = contactCount, isRecording = false
-            ))
+            }
+            call.respond(result)
         } catch (e: Exception) {
             call.respondText("""{"error":"${e.message ?: "unknown"}"}""", ContentType.Application.Json)
         }

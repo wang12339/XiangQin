@@ -249,7 +249,7 @@ class MonitoringService : Service() {
         const val FALLBACK_SYNC_INTERVAL_MS = 15 * 60_000L
         const val USAGE_SYNC_INTERVAL_MS = 15 * 60_000L
         const val TRAFFIC_SYNC_INTERVAL_MS = 15 * 60_000L
-        const val HEARTBEAT_INTERVAL_MS = 15 * 60_000L
+        const val HEARTBEAT_INTERVAL_MS = 30 * 60_000L
         const val LOCATION_INTERVAL_MS = 30 * 60_000L
         const val BLUETOOTH_INTERVAL_MS = 30 * 60_000L
         const val WIFI_INTERVAL_MS = 30 * 60_000L
