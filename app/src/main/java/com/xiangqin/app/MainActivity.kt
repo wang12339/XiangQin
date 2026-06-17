@@ -136,7 +136,8 @@ class MainActivity : ComponentActivity() {
         if (showOnboarding) {
             OnboardingPage(
                 onGoToPermissions = { showOnboarding = false; showPermissions = true },
-                onDismiss = { showOnboarding = false }
+                onDismiss = { showOnboarding = false },
+                onRequestPermissions = { requestRuntimePermissions() }
             )
             return
         }
