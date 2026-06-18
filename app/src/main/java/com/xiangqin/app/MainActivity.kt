@@ -456,13 +456,28 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startMonitoring() {
-        val hasCallLog = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
-        val hasSms = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
-        if (!hasCallLog || !hasSms) { requestRuntimePermissions(); return }
+        val needed = listOf(
+            Manifest.permission.READ_CALL_LOG,
+            Manifest.permission.READ_SMS,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+        )
+        val missing = needed.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isNotEmpty()) {
+            android.widget.Toast.makeText(this, "请先授予以下权限：${missing.mapNotNull { PermissionHelper.permissionDisplayNames[it] }.joinToString("、")}", android.widget.Toast.LENGTH_LONG).show()
+            requestRuntimePermissions()
+            return
+        }
 
-        val intent = Intent(this, MonitoringService::class.java)
-        val isEmulator = Build.FINGERPRINT.contains("generic") || Build.FINGERPRINT.contains("sdk_gphone")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !isEmulator) startForegroundService(intent) else startService(intent)
+        try {
+            val intent = Intent(this, MonitoringService::class.java)
+            val isEmulator = Build.FINGERPRINT.contains("generic") || Build.FINGERPRINT.contains("sdk_gphone")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !isEmulator) startForegroundService(intent) else startService(intent)
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(this, "启动监控失败：${e.message}", android.widget.Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun stopMonitoring() {
