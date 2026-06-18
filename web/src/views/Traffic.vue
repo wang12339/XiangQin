@@ -62,7 +62,7 @@ const list = ref<any[]>([])
 const loading = ref(true)
 
 onMounted(async () => {
-  list.value = (await api.get('/api/traffic')).data.items || []
+  list.value = (await api.get('/api/traffic')).data.traffic || []
   loading.value = false
 })
 
