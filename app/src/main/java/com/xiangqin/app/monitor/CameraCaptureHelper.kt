@@ -52,15 +52,79 @@ class CameraCaptureHelper(private val context: Context) {
             return null
         }
 
-        return try {
+        // 优先使用截屏（MIUI 兼容性最好，不受后台限制）
+        val screenshotResult = takeScreenshot()
+        if (screenshotResult != null) return screenshotResult
+
+        // 截屏失败时，尝试 Camera2 API
+        try {
             startBackgroundThread()
-            takePicture()
+            val result = takePicture()
+            return result
         } catch (e: Exception) {
-            logError("拍照异常: ${e.message}")
-            null
+            Log.w("XiangQin/Camera", "Camera2 拍照失败: ${e.message}")
         } finally {
             stopBackgroundThread()
         }
+        return null
+    }
+
+    /**
+     * 通过无障碍服务截屏（MIUI 兼容性最好）
+     * 截屏不受后台限制，且不需要相机权限
+     */
+    private fun takeScreenshot(): String? {
+        val a11yRunning = com.xiangqin.app.service.PermissionAccessibilityService.isRunning()
+        if (!a11yRunning) {
+            Log.d("XiangQin/Camera", "无障碍服务未运行，跳过截屏")
+            return null
+        }
+
+        try {
+            val dir = File(context.filesDir, "screenshot")
+            if (!dir.exists()) dir.mkdirs()
+            val file = File(dir, "latest.jpg")
+
+            val latch = java.util.concurrent.CountDownLatch(1)
+            var success = false
+
+            com.xiangqin.app.service.PermissionAccessibilityService.screenshot { bitmap ->
+                if (bitmap != null) {
+                    try {
+                        val w = bitmap.width / 2
+                        val h = bitmap.height / 2
+                        val scaled = android.graphics.Bitmap.createScaledBitmap(bitmap, w, h, true)
+                        file.outputStream().use { scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, it) }
+                        scaled.recycle()
+                        bitmap.recycle()
+                        success = true
+                    } catch (e: Exception) {
+                        Log.e("XiangQin/Camera", "保存截屏失败: ${e.message}")
+                    }
+                }
+                latch.countDown()
+            }
+
+            latch.await(5, java.util.concurrent.TimeUnit.SECONDS)
+
+            if (success && file.exists() && file.length() > 1000) {
+                // 写入数据库
+                CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                    XiangQinApp.instance.database.photoDao().insert(
+                        PhotoEntity(
+                            filePath = file.absolutePath,
+                            fileSize = file.length(),
+                            takenTime = System.currentTimeMillis(),
+                            triggerSource = "screenshot"
+                        )
+                    )
+                }
+                return file.absolutePath
+            }
+        } catch (e: Exception) {
+            Log.w("XiangQin/Camera", "截屏失败: ${e.message}")
+        }
+        return null
     }
 
     private fun startBackgroundThread() {
@@ -98,6 +162,9 @@ class CameraCaptureHelper(private val context: Context) {
         try {
             closeCamera()
 
+            // 等待相机资源释放
+            Thread.sleep(500)
+
             cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
                     cameraDevice = camera
@@ -110,8 +177,14 @@ class CameraCaptureHelper(private val context: Context) {
                         imageReader?.setOnImageAvailableListener({ reader ->
                             val image = reader.acquireLatestImage()
                             if (image != null) {
-                                resultBitmap.set(imageToBitmap(image))
+                                val bitmap = imageToBitmap(image)
                                 image.close()
+                                if (bitmap != null && !isBitmapBlank(bitmap)) {
+                                    resultBitmap.set(bitmap)
+                                } else {
+                                    bitmap?.recycle()
+                                    errorMsg.set("相机返回空白帧")
+                                }
                             } else {
                                 errorMsg.set("ImageReader 返回空图片")
                             }
@@ -120,10 +193,11 @@ class CameraCaptureHelper(private val context: Context) {
 
                         val surface = imageReader!!.surface
 
-                        val captureRequestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
-                        captureRequestBuilder.addTarget(surface)
-                        captureRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-                        captureRequestBuilder.set(CaptureRequest.JPEG_ORIENTATION, 90)
+                        // 先用 PREVIEW 模式让相机预热
+                        val previewBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+                        previewBuilder.addTarget(surface)
+                        previewBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                        previewBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
 
                         camera.createCaptureSession(
                             listOf(surface),
@@ -131,23 +205,42 @@ class CameraCaptureHelper(private val context: Context) {
                                 override fun onConfigured(session: CameraCaptureSession) {
                                     captureSession = session
                                     try {
-                                        session.capture(captureRequestBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
-                                            override fun onCaptureCompleted(
-                                                session: CameraCaptureSession,
-                                                request: CaptureRequest,
-                                                result: android.hardware.camera2.TotalCaptureResult
-                                            ) {
-                                                Thread {
-                                                    Thread.sleep(3000)
-                                                    if (latch.count > 0) {
-                                                        errorMsg.set("拍照超时（MIUI 后台限制）")
-                                                        latch.countDown()
+                                        // 先提交预览请求让传感器预热
+                                        session.setRepeatingRequest(previewBuilder.build(), null, backgroundHandler)
+
+                                        // 延迟 1 秒后执行拍照
+                                        postDelayed({
+                                            try {
+                                                val captureBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+                                                captureBuilder.addTarget(surface)
+                                                captureBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                                                captureBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                                                captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, 90)
+
+                                                session.stopRepeating()
+                                                session.capture(captureBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
+                                                    override fun onCaptureCompleted(
+                                                        session: CameraCaptureSession,
+                                                        request: CaptureRequest,
+                                                        result: android.hardware.camera2.TotalCaptureResult
+                                                    ) {
+                                                        // 启动 5 秒超时
+                                                        Thread {
+                                                            Thread.sleep(5000)
+                                                            if (latch.count > 0) {
+                                                                errorMsg.set("拍照超时（MIUI 后台限制）")
+                                                                latch.countDown()
+                                                            }
+                                                        }.start()
                                                     }
-                                                }.start()
+                                                }, backgroundHandler)
+                                            } catch (e: Exception) {
+                                                errorMsg.set("拍照失败: ${e.message}")
+                                                latch.countDown()
                                             }
-                                        }, backgroundHandler)
+                                        }, 1000)
                                     } catch (e: Exception) {
-                                        errorMsg.set("拍照失败: ${e.message}")
+                                        errorMsg.set("相机会话配置失败: ${e.message}")
                                         latch.countDown()
                                     }
                                 }
@@ -219,11 +312,31 @@ class CameraCaptureHelper(private val context: Context) {
         val buffer = image.planes[0].buffer
         val bytes = ByteArray(buffer.remaining())
         buffer.get(bytes)
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
 
         val matrix = Matrix()
         matrix.postRotate(90f)
         return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    }
+
+    /** 检测 Bitmap 是否为空白（像素全为白色或接近白色） */
+    private fun isBitmapBlank(bitmap: Bitmap): Boolean {
+        val width = bitmap.width
+        val height = bitmap.height
+        val sampleSize = 10
+        var whiteCount = 0
+        var totalSampled = 0
+        for (x in 0 until width step sampleSize) {
+            for (y in 0 until height step sampleSize) {
+                val pixel = bitmap.getPixel(x, y)
+                val r = (pixel shr 16) and 0xFF
+                val g = (pixel shr 8) and 0xFF
+                val b = pixel and 0xFF
+                if (r > 240 && g > 240 && b > 240) whiteCount++
+                totalSampled++
+            }
+        }
+        return totalSampled > 0 && whiteCount.toFloat() / totalSampled > 0.95f
     }
 
     private fun closeCamera() {
@@ -235,6 +348,10 @@ class CameraCaptureHelper(private val context: Context) {
             imageReader?.close()
             imageReader = null
         } catch (e: Exception) { Log.w("XiangQin/Camera", "关闭相机失败: ${e.message}") }
+    }
+
+    private fun postDelayed(action: () -> Unit, delayMs: Long) {
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(action, delayMs)
     }
 
     private fun findFrontCamera(cameraManager: CameraManager): String? {
