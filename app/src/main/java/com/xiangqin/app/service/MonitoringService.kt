@@ -98,6 +98,9 @@ class MonitoringService : Service() {
 
         startForeground(NOTIFICATION_ID, createNotification())
 
+        // 请求电池优化豁免（防止 MIUI 杀后台）
+        requestBatteryOptimizationExempt()
+
         val wakeLock = (getSystemService(POWER_SERVICE) as PowerManager).run {
             newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "XiangQin:StartupLock")
         }
@@ -113,6 +116,7 @@ class MonitoringService : Service() {
         }
 
         KeepAliveReceiver.scheduleNextAlarm(this)
+        com.xiangqin.app.worker.KeepAliveWorker.schedule(this)
 
         serviceScope.launch {
             try { XiangQinApp.instance.dataStore.setLastBootTime(System.currentTimeMillis()) }
@@ -215,11 +219,14 @@ class MonitoringService : Service() {
         val pendingIntent = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val stopIntent = PendingIntent.getService(this, 1, Intent(this, MonitoringService::class.java).apply { putExtra("STOP_SERVICE", true) }, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         return NotificationCompat.Builder(this, XiangQinApp.CHANNEL_MONITORING)
-            .setContentTitle("乡亲监控运行中").setContentText("点击查看详情 · 下拉锁定可防止被清理")
+            .setContentTitle("乡亲守护中").setContentText("家庭安全监控运行中")
             .setSmallIcon(android.R.drawable.ic_menu_info_details).setContentIntent(pendingIntent)
-            .setOngoing(true).setSilent(false).setPriority(NotificationCompat.PRIORITY_MIN)
+            .setOngoing(true).setSilent(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "停止", stopIntent)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE).build()
+            .build()
     }
 
     fun showAlertNotifications(alerts: List<AlertEntity>) {
@@ -240,6 +247,22 @@ class MonitoringService : Service() {
         serviceScope.launch {
             try { com.xiangqin.app.server.EventBroadcaster.broadcast(type, data) }
             catch (e: Exception) { android.util.Log.w("XiangQin", "广播事件失败: ${e.message}") }
+        }
+    }
+
+    /** 请求电池优化豁免 */
+    private fun requestBatteryOptimizationExempt() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                try {
+                    val intent = android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = android.net.Uri.parse("package:$packageName")
+                    }
+                    intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(intent)
+                } catch (_: Exception) { }
+            }
         }
     }
 

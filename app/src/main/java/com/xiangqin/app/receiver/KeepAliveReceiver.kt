@@ -67,7 +67,7 @@ class KeepAliveReceiver : BroadcastReceiver() {
         const val ACTION_BOOT_WATCHDOG = "com.xiangqin.action.BOOT_WATCHDOG"
 
         /** 保活检查间隔：5 分钟 */
-        private const val WATCHDOG_INTERVAL_MS = 15 * 60 * 1000L
+        private const val WATCHDOG_INTERVAL_MS = 5 * 60 * 1000L
 
         /**
          * 注册下一次保活闹钟
