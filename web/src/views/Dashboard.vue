@@ -187,17 +187,20 @@ function handleWsMessage(event: MessageEvent) {
 
 onMounted(async () => {
   await loadData()
+  let reconnectDelay = 1000
+  const maxDelay = 30000
   try {
     ws = createWs()
     ws.onmessage = handleWsMessage
-    ws.onopen = () => { wsConnected.value = true }
+    ws.onopen = () => { wsConnected.value = true; reconnectDelay = 1000 }
     ws.onclose = () => {
       wsConnected.value = false
       setTimeout(() => {
         if (!ws || ws.readyState === WebSocket.CLOSED) {
-          try { ws = createWs(); ws.onmessage = handleWsMessage; ws.onopen = () => { wsConnected.value = true } } catch {}
+          try { ws = createWs(); ws.onmessage = handleWsMessage; ws.onopen = () => { wsConnected.value = true; reconnectDelay = 1000 } } catch {}
         }
-      }, 3000)
+      }, reconnectDelay)
+      reconnectDelay = Math.min(reconnectDelay * 2, maxDelay)
     }
     ws.onerror = () => {}
   } catch {}

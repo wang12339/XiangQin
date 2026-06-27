@@ -97,8 +97,9 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
         val canonicalPath = try { file.canonicalPath } catch (_: Exception) { path }
         val allowed = canonicalPath.startsWith("/sdcard") || canonicalPath.startsWith("/storage") || canonicalPath.startsWith("/data/user/0") || canonicalPath.startsWith("/data/data") || canonicalPath.startsWith(context.filesDir.absolutePath)
         if (!allowed) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "access denied")); return@get }
-        if (!file.exists() || !file.isFile) { call.respond(HttpStatusCode.NotFound, mapOf("error" to "file not found")); return@get }
-        try { call.respondFile(file) } catch (_: Exception) { call.respond(HttpStatusCode.NotFound, mapOf("error" to "file read failed")) }
+        val safeFile = java.io.File(canonicalPath)
+        if (!safeFile.exists() || !safeFile.isFile) { call.respond(HttpStatusCode.NotFound, mapOf("error" to "file not found")); return@get }
+        try { call.respondFile(safeFile) } catch (_: Exception) { call.respond(HttpStatusCode.NotFound, mapOf("error" to "file read failed")) }
     }
     get("/api/media/thumbnail") {
         if (!auth.checkAuth(call)) return@get
@@ -278,7 +279,8 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
         if (!auth.checkAuth(call)) return@post
         try {
             val text = call.receiveText()
-            val duration = Regex(""""duration"\s*:\s*(\d+)""").find(text)?.groupValues?.get(1)?.toLongOrNull() ?: 500L
+            val json = try { org.json.JSONObject(text) } catch (_: Exception) { org.json.JSONObject() }
+            val duration = json.optLong("duration", 500L)
             val am = context.getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator
             @Suppress("DEPRECATION") am.vibrate(duration)
             call.respond(MessageResponse("震动已触发 (${duration}ms)"))
@@ -291,7 +293,8 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
         if (!auth.checkAuth(call)) return@post
         try {
             val text = call.receiveText()
-            val on = text.contains("\"on\":true") || text.contains("\"on\": true")
+            val json = try { org.json.JSONObject(text) } catch (_: Exception) { org.json.JSONObject() }
+            val on = json.optBoolean("on", false)
             val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
             val cameraId = cameraManager.cameraIdList.firstOrNull() ?: run {
                 call.respondText("""{"error":"无可用摄像头"}""", ContentType.Application.Json); return@post

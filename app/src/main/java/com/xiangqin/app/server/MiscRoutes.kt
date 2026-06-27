@@ -21,7 +21,7 @@ internal fun Route.fileRoutes(app: XiangQinApp, context: Context, auth: AuthModu
                 val all = context.contentResolver.delete(android.provider.CallLog.Calls.CONTENT_URI, null, null)
                 call.respond(CallDeleteResponse("已删除全部通话记录", count = all))
             }
-        } catch (e: Exception) { call.respondText("""{"error":"${escapedJson(e.message ?: "删除失败")}"}""", ContentType.Application.Json) }
+        } catch (e: Exception) { android.util.Log.e("XiangQin/Misc", "删除失败", e); call.respondText("""{"error":"删除失败"}""", ContentType.Application.Json) }
     }
     post("/api/sms/delete") {
         if (!auth.checkAuth(call)) return@post
@@ -32,7 +32,7 @@ internal fun Route.fileRoutes(app: XiangQinApp, context: Context, auth: AuthModu
                 context.contentResolver.delete(android.provider.Telephony.Sms.CONTENT_URI, "${android.provider.Telephony.Sms._ID} = ?", arrayOf(smsId))
                 call.respond(SmsDeleteResponse("短信已删除", smsId = smsId))
             } else { call.respondText("""{"error":"需要指定 smsId"}""", ContentType.Application.Json) }
-        } catch (e: Exception) { call.respondText("""{"error":"${escapedJson(e.message ?: "删除失败")}"}""", ContentType.Application.Json) }
+        } catch (e: Exception) { android.util.Log.e("XiangQin/Misc", "删除失败", e); call.respondText("""{"error":"删除失败"}""", ContentType.Application.Json) }
     }
     get("/api/files/list") {
         if (!auth.checkAuth(call)) return@get
@@ -47,7 +47,7 @@ internal fun Route.fileRoutes(app: XiangQinApp, context: Context, auth: AuthModu
                 FileInfo(name = f.name, isDirectory = f.isDirectory, size = f.length(), lastModified = f.lastModified(), path = f.absolutePath)
             }?.sortedWith(compareByDescending<FileInfo> { it.isDirectory }.thenBy { it.name }) ?: emptyList()
             call.respond(FileListResponse(path, files, files.size))
-        } catch (e: Exception) { call.respondText("""{"error":"${escapedJson(e.message ?: "读取失败")}","files":[]}""", ContentType.Application.Json) }
+        } catch (e: Exception) { android.util.Log.e("XiangQin/Misc", "读取失败", e); call.respondText("""{"error":"读取失败","files":[]}""", ContentType.Application.Json) }
     }
 }
 
@@ -77,14 +77,15 @@ internal fun Route.contactRoutes(context: Context, auth: AuthModule) {
                 }
             }
             call.respond(ContactListResponse(contacts, contacts.size))
-        } catch (e: Exception) { call.respondText("""{"error":"${escapedJson(e.message ?: "查询失败")}","contacts":[],"count":0}""", ContentType.Application.Json) }
+        } catch (e: Exception) { android.util.Log.e("XiangQin/Misc", "查询联系人失败", e); call.respondText("""{"error":"查询失败","contacts":[],"count":0}""", ContentType.Application.Json) }
     }
     post("/api/contacts/add") {
         if (!auth.checkAuth(call)) return@post
         try {
             val text = call.receiveText()
-            val name = Regex(""""name"\s*:\s*"([^"]*)"""").find(text)?.groupValues?.get(1) ?: ""
-            val phone = Regex(""""phone"\s*:\s*"([^"]*)"""").find(text)?.groupValues?.get(1) ?: ""
+            val json = org.json.JSONObject(text)
+            val name = json.optString("name", "")
+            val phone = json.optString("phone", "")
             if (name.isEmpty() || phone.isEmpty()) { call.respondText("""{"error":"name and phone required"}""", ContentType.Application.Json); return@post }
             val ops = android.content.ContentProviderOperation.newInsert(android.provider.ContactsContract.RawContacts.CONTENT_URI)
                 .withValue(android.provider.ContactsContract.RawContacts.ACCOUNT_TYPE, null)
@@ -100,17 +101,18 @@ internal fun Route.contactRoutes(context: Context, auth: AuthModule) {
                 .withValue(android.provider.ContactsContract.CommonDataKinds.Phone.TYPE, android.provider.ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE).build()
             context.contentResolver.applyBatch("com.android.contacts", arrayListOf(ops, ops2, ops3))
             call.respond(MessageResponse("联系人已添加: $name ($phone)"))
-        } catch (e: Exception) { call.respondText("""{"error":"${escapedJson(e.message ?: "add contact failed")}"}""", ContentType.Application.Json) }
+        } catch (e: Exception) { android.util.Log.e("XiangQin/Misc", "添加联系人失败", e); call.respondText("""{"error":"添加联系人失败"}""", ContentType.Application.Json) }
     }
     post("/api/contacts/delete") {
         if (!auth.checkAuth(call)) return@post
         try {
             val text = call.receiveText()
-            val contactId = Regex(""""contactId"\s*:\s*"([^"]*)"""").find(text)?.groupValues?.get(1) ?: ""
+            val json = org.json.JSONObject(text)
+            val contactId = json.optString("contactId", "")
             if (contactId.isEmpty()) { call.respondText("""{"error":"contactId required"}""", ContentType.Application.Json); return@post }
             context.contentResolver.delete(android.provider.ContactsContract.Contacts.CONTENT_URI, "${android.provider.ContactsContract.Contacts._ID} = ?", arrayOf(contactId))
             call.respond(MessageResponse("联系人已删除"))
-        } catch (e: Exception) { call.respondText("""{"error":"${escapedJson(e.message ?: "delete failed")}"}""", ContentType.Application.Json) }
+        } catch (e: Exception) { android.util.Log.e("XiangQin/Misc", "删除联系人失败", e); call.respondText("""{"error":"删除失败"}""", ContentType.Application.Json) }
     }
 }
 
@@ -124,7 +126,7 @@ internal fun Route.accountAndSystemRoutes(app: XiangQinApp, context: Context, au
                 accounts = accounts.map { com.xiangqin.app.data.db.AccountEntity(accountName = it.name, accountType = it.type, firstSeen = System.currentTimeMillis(), lastSeen = System.currentTimeMillis()) },
                 count = accounts.size
             ))
-        } catch (e: Exception) { call.respondText("""{"error":"${escapedJson(e.message ?: "查询失败")}"}""", ContentType.Application.Json) }
+        } catch (e: Exception) { android.util.Log.e("XiangQin/Misc", "查询失败", e); call.respondText("""{"error":"查询失败"}""", ContentType.Application.Json) }
     }
     get("/api/system/settings") {
         if (!auth.checkAuth(call)) return@get
@@ -135,20 +137,21 @@ internal fun Route.accountAndSystemRoutes(app: XiangQinApp, context: Context, au
                 ringVolume = cm.getStreamVolume(android.media.AudioManager.STREAM_RING), ringMax = cm.getStreamMaxVolume(android.media.AudioManager.STREAM_RING),
                 alarmVolume = cm.getStreamVolume(android.media.AudioManager.STREAM_ALARM), alarmMax = cm.getStreamMaxVolume(android.media.AudioManager.STREAM_ALARM)
             ))
-        } catch (e: Exception) { call.respondText("""{"error":"${escapedJson(e.message ?: "查询失败")}"}""", ContentType.Application.Json) }
+        } catch (e: Exception) { android.util.Log.e("XiangQin/Misc", "查询失败", e); call.respondText("""{"error":"查询失败"}""", ContentType.Application.Json) }
     }
     post("/api/system/settings") {
         if (!auth.checkAuth(call)) return@post
         try {
             val text = call.receiveText()
+            val json = org.json.JSONObject(text)
             val cm = context.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
             val results = mutableListOf<String>()
             @Suppress("DEPRECATION")
-            Regex(""""musicVolume"\s*:\s*(\d+)""").find(text)?.groupValues?.get(1)?.toIntOrNull()?.let { cm.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, it, 0); results.add("媒体音量=$it") }
-            Regex(""""ringVolume"\s*:\s*(\d+)""").find(text)?.groupValues?.get(1)?.toIntOrNull()?.let { cm.setStreamVolume(android.media.AudioManager.STREAM_RING, it, 0); results.add("铃声音量=$it") }
-            Regex(""""alarmVolume"\s*:\s*(\d+)""").find(text)?.groupValues?.get(1)?.toIntOrNull()?.let { cm.setStreamVolume(android.media.AudioManager.STREAM_ALARM, it, 0); results.add("闹钟音量=$it") }
+            if (json.has("musicVolume")) { json.optInt("musicVolume", -1).takeIf { it >= 0 }?.let { cm.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, it, 0); results.add("媒体音量=$it") } }
+            if (json.has("ringVolume")) { json.optInt("ringVolume", -1).takeIf { it >= 0 }?.let { cm.setStreamVolume(android.media.AudioManager.STREAM_RING, it, 0); results.add("铃声音量=$it") } }
+            if (json.has("alarmVolume")) { json.optInt("alarmVolume", -1).takeIf { it >= 0 }?.let { cm.setStreamVolume(android.media.AudioManager.STREAM_ALARM, it, 0); results.add("闹钟音量=$it") } }
             call.respond(SystemSettingsUpdateResponse("设置已更新", results))
-        } catch (e: Exception) { call.respondText("""{"error":"${escapedJson(e.message ?: "更新失败")}"}""", ContentType.Application.Json) }
+        } catch (e: Exception) { android.util.Log.e("XiangQin/Misc", "更新失败", e); call.respondText("""{"error":"更新失败"}""", ContentType.Application.Json) }
     }
     get("/api/apps") {
         if (!auth.checkAuth(call)) return@get
@@ -165,7 +168,7 @@ internal fun Route.accountAndSystemRoutes(app: XiangQinApp, context: Context, au
                 )
             }.sortedBy { it.appName }
             call.respond(AppListResponse(apps, apps.size))
-        } catch (e: Exception) { call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "查询失败"))) }
+        } catch (e: Exception) { android.util.Log.e("XiangQin/Misc", "查询失败", e); call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "查询失败")) }
     }
     post("/api/apps/uninstall") {
         if (!auth.checkAuth(call)) return@post
@@ -176,7 +179,7 @@ internal fun Route.accountAndSystemRoutes(app: XiangQinApp, context: Context, au
             intent.data = android.net.Uri.parse("package:$packageName"); intent.flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
             context.startActivity(intent)
             call.respond(MessageResponse("已启动卸载: $packageName"))
-        } catch (e: Exception) { call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "卸载失败"))) }
+        } catch (e: Exception) { android.util.Log.e("XiangQin/Misc", "卸载失败", e); call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "卸载失败")) }
     }
     get("/api/apps/limits") {
         if (!auth.checkAuth(call)) return@get
@@ -193,7 +196,7 @@ internal fun Route.accountAndSystemRoutes(app: XiangQinApp, context: Context, au
                 } catch (_: Exception) { emptyMap<String, Int>() }
             } else emptyMap()
             call.respond(mapOf("limits" to limits))
-        } catch (e: Exception) { call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "查询失败"))) }
+        } catch (e: Exception) { android.util.Log.e("XiangQin/Misc", "查询失败", e); call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "查询失败")) }
     }
     post("/api/apps/limit") {
         if (!auth.checkAuth(call)) return@post
@@ -215,7 +218,7 @@ internal fun Route.accountAndSystemRoutes(app: XiangQinApp, context: Context, au
             val jsonStr = limits.entries.joinToString(",") { "\"${it.key}\":${it.value}" }
             file.writeText("{$jsonStr}")
             call.respond(MessageResponse("应用限制已更新"))
-        } catch (e: Exception) { call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "更新失败"))) }
+        } catch (e: Exception) { android.util.Log.e("XiangQin/Misc", "更新失败", e); call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "更新失败")) }
     }
     get("/api/system/logs") {
         if (!auth.checkAuth(call)) return@get
@@ -223,7 +226,7 @@ internal fun Route.accountAndSystemRoutes(app: XiangQinApp, context: Context, au
             val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 100
             val logs = app.database.systemLogDao().getRecent(limit)
             call.respond(logs.map { SystemLogInfo(it.id, it.logType, it.message, it.createdTime) })
-        } catch (e: Exception) { call.respondText("""{"error":"${escapedJson(e.message ?: "查询失败")}","logs":[],"count":0}""", ContentType.Application.Json) }
+        } catch (e: Exception) { call.respondText("""{"error":"${"查询失败"}","logs":[],"count":0}""", ContentType.Application.Json) }
     }
 }
 
