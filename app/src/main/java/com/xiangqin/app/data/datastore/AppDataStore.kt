@@ -1,276 +1,306 @@
 package com.xiangqin.app.data.datastore
 
 import android.content.Context
-import androidx.datastore.preferences.core.*
-import androidx.datastore.preferences.preferencesDataStore
+import android.content.SharedPreferences
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKeys
 import com.xiangqin.app.data.db.HomeZone
-// 📱 SIM 卡信息
 import com.xiangqin.app.monitor.SimCardInfo
-// 📡 基站信息
 import com.xiangqin.app.monitor.CellTowerInfo
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-
-private val Context.dataStore by preferencesDataStore(name = "xiangqin_settings")
+import kotlinx.coroutines.runBlocking
 
 class AppDataStore(private val context: Context) {
 
-    // Web 管理面板密码
-    private val webPasswordKey = stringPreferencesKey("web_password")
-    // 数据库密码 PIN（用户设置，用于 SQLCipher 加密）
-    private val dbPinKey = stringPreferencesKey("db_pin")
-    // 首次启动标记
-    private val firstLaunchKey = stringPreferencesKey("first_launch_done")
+    private val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+    private val encryptedPrefs: SharedPreferences by lazy {
+        EncryptedSharedPreferences.create(
+            "xiangqin_secure_prefs",
+            masterKeyAlias,
+            context,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    }
 
-    // 🚨 告警配置
-    private val feishuWebhookKey = stringPreferencesKey("feishu_webhook")
-    private val homeLatitudeKey = stringPreferencesKey("home_latitude")
-    private val homeLongitudeKey = stringPreferencesKey("home_longitude")
-    private val homeRadiusKey = stringPreferencesKey("home_radius")
-    private val homeAddressKey = stringPreferencesKey("home_address")
+    private val plainPrefs by lazy {
+        context.getSharedPreferences("xiangqin_plain_prefs", Context.MODE_PRIVATE)
+    }
+
+    // Sensitive keys → EncryptedSharedPreferences
+    private val webPasswordKey = "web_password"
+    private val dbPinKey = "db_pin"
+    private val relayTokenKey = "relay_token"
+
+    // Non-sensitive keys → plain SharedPreferences
+    private val firstLaunchKey = "first_launch_done"
+    private val feishuWebhookKey = "feishu_webhook"
+    private val homeLatitudeKey = "home_latitude"
+    private val homeLongitudeKey = "home_longitude"
+    private val homeRadiusKey = "home_radius"
+    private val homeAddressKey = "home_address"
     private val alertEnabledPrefix = "alert_enabled_"
+    private val simStateKey = "sim_state"
+    private val simOperatorKey = "sim_operator"
+    private val simCountryIsoKey = "sim_country_iso"
+    private val simSerialKey = "sim_serial"
+    private val lastHeartbeatKey = "last_heartbeat"
+    private val lastBootTimeKey = "last_boot_time"
+    private val lastWifiSsidKey = "last_wifi_ssid"
+    private val lastWifiBssidKey = "last_wifi_bssid"
+    private val lastAlertedWifiSsidKey = "last_alerted_wifi_ssid"
+    private val cellIdKey = "cell_id"
+    private val cellOperatorKey = "cell_operator"
+    private val cellTechKey = "cell_tech"
+    private val relayUrlKey = "relay_url"
+    private val webPortKey = "web_port"
 
-    // 📱 SIM 卡存储
-    private val simStateKey = stringPreferencesKey("sim_state")
-    private val simOperatorKey = stringPreferencesKey("sim_operator")
-    private val simCountryIsoKey = stringPreferencesKey("sim_country_iso")
-    private val simSerialKey = stringPreferencesKey("sim_serial")
+    private fun getSensitive(key: String): String? {
+        return when (key) {
+            DB_PIN -> encryptedPrefs.getString(dbPinKey, null)
+            WEB_PASSWORD -> encryptedPrefs.getString(webPasswordKey, null)
+            else -> null
+        }
+    }
 
-    // 💓 心跳
-    private val lastHeartbeatKey = longPreferencesKey("last_heartbeat")
-    private val lastBootTimeKey = longPreferencesKey("last_boot_time")
-    private val lastWifiSsidKey = stringPreferencesKey("last_wifi_ssid")
-    private val lastWifiBssidKey = stringPreferencesKey("last_wifi_bssid")
-    private val lastAlertedWifiSsidKey = stringPreferencesKey("last_alerted_wifi_ssid")
+    private fun saveSensitive(key: String, value: String) {
+        when (key) {
+            DB_PIN -> encryptedPrefs.edit().putString(dbPinKey, value).apply()
+            WEB_PASSWORD -> encryptedPrefs.edit().putString(webPasswordKey, value).apply()
+        }
+    }
 
-    // 📡 基站记录
-    private val cellIdKey = longPreferencesKey("cell_id")
-    private val cellOperatorKey = stringPreferencesKey("cell_operator")
-    private val cellTechKey = stringPreferencesKey("cell_tech")
-
-    /** 获取 Web 密码（同步，用于启动时）— 直接读 SharedPreferences，不阻塞 */
     fun getSync(key: String): String? {
-        return try {
-            val prefs = context.getSharedPreferences("xiangqin_settings", Context.MODE_PRIVATE)
-            when (key) {
-                DB_PIN -> prefs.getString(dbPinKey.name, null)
-                WEB_PASSWORD -> prefs.getString(webPasswordKey.name, null)
-                else -> null
-            }
-        } catch (_: Exception) { null }
+        return try { getSensitive(key) } catch (_: Exception) { null }
     }
 
-    /** 获取 Web 密码（协程） */
+    fun saveSync(key: String, value: String) {
+        try { saveSensitive(key, value) } catch (_: Exception) { }
+    }
+
     suspend fun getWebPassword(): String {
-        val prefs = context.dataStore.data.first()
-        val stored = prefs[webPasswordKey]
+        val stored = encryptedPrefs.getString(webPasswordKey, null)
         if (stored != null) return stored
-
-        // 密码不存在，生成并保存
         val pw = generateDefaultPassword()
-        // 确保保存完成后再返回
-        context.dataStore.edit { prefs -> prefs[webPasswordKey] = pw }
-        android.util.Log.i("XiangQin", "生成并保存密码: $pw")
+        encryptedPrefs.edit().putString(webPasswordKey, pw).apply()
+        android.util.Log.i("XiangQin", "Web 密码已初始化")
         return pw
     }
 
-    /** 生成随机初始密码（首次启动时使用） */
-    private suspend fun generateDefaultPassword(): String {
-        val pw = "xiangqin123"
-        android.util.Log.w("XiangQin", "=== 默认密码: $pw ===")
-        return pw
+    private fun generateDefaultPassword(): String {
+        val chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#\$%^&*"
+        val rng = java.security.SecureRandom()
+        return (1..12).map { chars[rng.nextInt(chars.length)] }.joinToString("")
     }
 
-    /** 设置 Web 密码 */
     suspend fun setWebPassword(password: String) {
-        context.dataStore.edit { prefs -> prefs[webPasswordKey] = password }
+        encryptedPrefs.edit().putString(webPasswordKey, password).apply()
     }
 
-    /** 获取数据库 PIN */
     suspend fun getDbPin(): String {
-        val prefs = context.dataStore.data.first()
-        return prefs[dbPinKey] ?: "0000"
+        val stored = encryptedPrefs.getString(dbPinKey, null)
+        if (stored != null) return stored
+        val pin = generateStrongPin()
+        encryptedPrefs.edit().putString(dbPinKey, pin).apply()
+        return pin
     }
 
-    /** 设置数据库 PIN */
+    private fun generateStrongPin(): String {
+        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+        val rng = java.security.SecureRandom()
+        return (1..32).map { chars[rng.nextInt(chars.length)] }.joinToString("")
+    }
+
     suspend fun setDbPin(pin: String) {
-        context.dataStore.edit { prefs -> prefs[dbPinKey] = pin }
+        encryptedPrefs.edit().putString(dbPinKey, pin).apply()
     }
 
-    /** 观察 Web 密码变化（Flow） */
     fun observeWebPassword(): Flow<String> {
-        return context.dataStore.data.map { prefs ->
-            prefs[webPasswordKey] ?: ""
+        return kotlinx.coroutines.flow.flow {
+            while (true) {
+                emit(encryptedPrefs.getString(webPasswordKey, "") ?: "")
+                kotlinx.coroutines.delay(1000)
+            }
         }
     }
 
-    /** 是否首次启动 */
     suspend fun isFirstLaunch(): Boolean {
-        val prefs = context.dataStore.data.first()
-        return prefs[firstLaunchKey] != "true"
+        return plainPrefs.getString(firstLaunchKey, null) != "true"
     }
 
-    /** 标记首次启动已完成 */
     suspend fun markFirstLaunchDone() {
-        context.dataStore.edit { prefs ->
-            prefs[firstLaunchKey] = "true"
-        }
+        plainPrefs.edit().putString(firstLaunchKey, "true").apply()
     }
 
-    // ====================== 🚨 飞书 Webhook ======================
+    // ====================== Feishu Webhook ======================
 
     suspend fun getFeishuWebhook(): String? {
-        return context.dataStore.data.first()[feishuWebhookKey]
+        return plainPrefs.getString(feishuWebhookKey, null)
     }
 
     suspend fun setFeishuWebhook(url: String) {
-        context.dataStore.edit { prefs ->
-            prefs[feishuWebhookKey] = url
-        }
+        plainPrefs.edit().putString(feishuWebhookKey, url).apply()
     }
 
-    // ====================== 🏠 家位置 ======================
+    // ====================== Home Zone ======================
 
     suspend fun setHomeZone(zone: HomeZone) {
-        context.dataStore.edit { prefs ->
-            prefs[homeLatitudeKey] = zone.latitude.toString()
-            prefs[homeLongitudeKey] = zone.longitude.toString()
-            prefs[homeRadiusKey] = zone.radiusMeters.toString()
-            if (zone.address != null) prefs[homeAddressKey] = zone.address
-        }
+        plainPrefs.edit().apply {
+            putString(homeLatitudeKey, zone.latitude.toString())
+            putString(homeLongitudeKey, zone.longitude.toString())
+            putString(homeRadiusKey, zone.radiusMeters.toString())
+            if (zone.address != null) putString(homeAddressKey, zone.address)
+        }.apply()
     }
 
     suspend fun getHomeZone(): HomeZone? {
-        val prefs = context.dataStore.data.first()
-        val lat = prefs[homeLatitudeKey]?.toDoubleOrNull() ?: return null
-        val lng = prefs[homeLongitudeKey]?.toDoubleOrNull() ?: return null
-        val radius = prefs[homeRadiusKey]?.toFloatOrNull() ?: 200f
-        val address = prefs[homeAddressKey]
+        val lat = plainPrefs.getString(homeLatitudeKey, null)?.toDoubleOrNull() ?: return null
+        val lng = plainPrefs.getString(homeLongitudeKey, null)?.toDoubleOrNull() ?: return null
+        val radius = plainPrefs.getString(homeRadiusKey, null)?.toFloatOrNull() ?: 200f
+        val address = plainPrefs.getString(homeAddressKey, null)
         return HomeZone(lat, lng, radius, address)
     }
 
-    // ====================== ⚙️ 告警开关 ======================
+    // ====================== Alert Settings ======================
 
     suspend fun isAlertEnabled(type: String): Boolean {
-        val key = booleanPreferencesKey(alertEnabledPrefix + type)
-        return context.dataStore.data.first()[key] ?: true
+        return plainPrefs.getBoolean(alertEnabledPrefix + type, true)
     }
 
     suspend fun setAlertEnabled(type: String, enabled: Boolean) {
-        val key = booleanPreferencesKey(alertEnabledPrefix + type)
-        context.dataStore.edit { prefs -> prefs[key] = enabled }
+        plainPrefs.edit().putBoolean(alertEnabledPrefix + type, enabled).apply()
     }
 
-    /** 获取所有告警开关状态 */
     suspend fun getAllAlertSettings(): Map<String, Boolean> {
-        val prefs = context.dataStore.data.first()
         val result = mutableMapOf<String, Boolean>()
         for (alertType in ALERT_TYPES) {
-            result[alertType] = prefs[booleanPreferencesKey(alertEnabledPrefix + alertType)] ?: true
+            result[alertType] = plainPrefs.getBoolean(alertEnabledPrefix + alertType, true)
         }
         return result
     }
 
-    /** 批量更新告警开关 */
     suspend fun setAllAlertSettings(settings: Map<String, Boolean>) {
-        context.dataStore.edit { prefs ->
+        plainPrefs.edit().apply {
             for ((type, enabled) in settings) {
-                prefs[booleanPreferencesKey(alertEnabledPrefix + type)] = enabled
+                putBoolean(alertEnabledPrefix + type, enabled)
             }
-        }
+        }.apply()
     }
 
-    // ====================== 💓 心跳 ======================
+    // ====================== Heartbeat ======================
 
     suspend fun getLastHeartbeatTime(): Long {
-        return context.dataStore.data.first()[lastHeartbeatKey] ?: 0L
+        return plainPrefs.getLong(lastHeartbeatKey, 0L)
     }
 
     suspend fun updateHeartbeat() {
-        context.dataStore.edit { prefs ->
-            prefs[lastHeartbeatKey] = System.currentTimeMillis()
-        }
+        plainPrefs.edit().putLong(lastHeartbeatKey, System.currentTimeMillis()).apply()
     }
 
     suspend fun getLastBootTime(): Long {
-        return context.dataStore.data.first()[lastBootTimeKey] ?: 0L
+        return plainPrefs.getLong(lastBootTimeKey, 0L)
     }
 
     suspend fun setLastBootTime(time: Long) {
-        context.dataStore.edit { prefs ->
-            prefs[lastBootTimeKey] = time
-        }
+        plainPrefs.edit().putLong(lastBootTimeKey, time).apply()
     }
 
-    // ====================== 📱 SIM 卡信息 ======================
+    // ====================== SIM Info ======================
 
     suspend fun getStoredSimInfo(): SimCardInfo? {
-        val prefs = context.dataStore.data.first()
-        val state = prefs[simStateKey] ?: return null
+        val state = plainPrefs.getString(simStateKey, null) ?: return null
         return SimCardInfo(
             state = state,
-            operator = prefs[simOperatorKey],
-            countryIso = prefs[simCountryIsoKey],
-            simSerial = prefs[simSerialKey]
+            operator = plainPrefs.getString(simOperatorKey, null),
+            countryIso = plainPrefs.getString(simCountryIsoKey, null),
+            simSerial = plainPrefs.getString(simSerialKey, null)
         )
     }
 
     suspend fun setStoredSimInfo(info: SimCardInfo) {
-        context.dataStore.edit { prefs ->
-            prefs[simStateKey] = info.state
-            if (info.operator != null) prefs[simOperatorKey] = info.operator
-            if (info.countryIso != null) prefs[simCountryIsoKey] = info.countryIso
-            if (info.simSerial != null) prefs[simSerialKey] = info.simSerial
-        }
+        plainPrefs.edit().apply {
+            putString(simStateKey, info.state)
+            if (info.operator != null) putString(simOperatorKey, info.operator)
+            if (info.countryIso != null) putString(simCountryIsoKey, info.countryIso)
+            if (info.simSerial != null) putString(simSerialKey, info.simSerial)
+        }.apply()
     }
 
-    // ====================== 📶 WiFi 连接记录 ======================
+    // ====================== WiFi ======================
 
     suspend fun getLastWifiSsid(): String? {
-        return context.dataStore.data.first()[lastWifiSsidKey]
+        return plainPrefs.getString(lastWifiSsidKey, null)
     }
 
     suspend fun setLastWifiInfo(ssid: String, bssid: String?) {
-        context.dataStore.edit { prefs ->
-            prefs[lastWifiSsidKey] = ssid
-            if (bssid != null) prefs[lastWifiBssidKey] = bssid
-        }
+        plainPrefs.edit().apply {
+            putString(lastWifiSsidKey, ssid)
+            if (bssid != null) putString(lastWifiBssidKey, bssid)
+        }.apply()
     }
 
     suspend fun getLastAlertedWifiSsid(): String? {
-        return context.dataStore.data.first()[lastAlertedWifiSsidKey]
+        return plainPrefs.getString(lastAlertedWifiSsidKey, null)
     }
 
     suspend fun setLastAlertedWifiSsid(ssid: String) {
-        context.dataStore.edit { prefs ->
-            prefs[lastAlertedWifiSsidKey] = ssid
-        }
+        plainPrefs.edit().putString(lastAlertedWifiSsidKey, ssid).apply()
     }
 
-    // ====================== 📡 基站信息 ======================
+    // ====================== Cell Tower ======================
 
     suspend fun getStoredCellId(): Long? {
-        return context.dataStore.data.first()[cellIdKey]
+        val v = plainPrefs.getLong(cellIdKey, -1L)
+        return if (v == -1L) null else v
     }
 
     suspend fun getStoredCellOperator(): String? {
-        return context.dataStore.data.first()[cellOperatorKey]
+        return plainPrefs.getString(cellOperatorKey, null)
     }
 
     suspend fun setCellInfo(info: CellTowerInfo) {
-        context.dataStore.edit { prefs ->
-            if (info.cellId != null) prefs[cellIdKey] = info.cellId
-            if (info.operator != null) prefs[cellOperatorKey] = info.operator
-            if (info.tech != null) prefs[cellTechKey] = info.tech
-        }
+        plainPrefs.edit().apply {
+            if (info.cellId != null) putLong(cellIdKey, info.cellId)
+            if (info.operator != null) putString(cellOperatorKey, info.operator)
+            if (info.tech != null) putString(cellTechKey, info.tech)
+        }.apply()
+    }
+
+    // ====================== Relay ======================
+
+    suspend fun getRelayUrl(): String? {
+        return plainPrefs.getString(relayUrlKey, null)
+    }
+
+    suspend fun setRelayUrl(url: String) {
+        plainPrefs.edit().putString(relayUrlKey, url).apply()
+    }
+
+    suspend fun getRelayToken(): String? {
+        return encryptedPrefs.getString(relayTokenKey, null)
+    }
+
+    suspend fun setRelayToken(token: String) {
+        encryptedPrefs.edit().putString(relayTokenKey, token).apply()
+    }
+
+    // ====================== Web Port ======================
+
+    suspend fun getWebPort(): Int {
+        return plainPrefs.getInt(webPortKey, 8080)
+    }
+
+    suspend fun setWebPort(port: Int) {
+        require(port in 1024..65535) { "端口必须在 1024-65535 范围内" }
+        plainPrefs.edit().putInt(webPortKey, port).apply()
     }
 
     companion object {
         const val DB_PIN = "db_pin"
         const val WEB_PASSWORD = "web_password"
 
-        // 告警类型标识（用于配置存储）
         const val ALERT_LATE_NIGHT_LEAVE = "late_night_leave"
         const val ALERT_LOW_BATTERY = "low_battery"
         const val ALERT_NO_HEARTBEAT = "no_heartbeat"

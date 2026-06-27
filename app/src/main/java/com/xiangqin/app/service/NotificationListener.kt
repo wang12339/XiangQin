@@ -21,15 +21,37 @@ import java.util.concurrent.Executors
  */
 class NotificationListener : NotificationListenerService() {
 
+    private val sensitivePackages = setOf(
+        "com.google.android.apps.authenticator2",
+        "com.authy.authy",
+        "com.twofas.app",
+        "com.android.chrome",
+        "org.mozilla.firefox",
+        "com.bank.*",
+        "com.icbc.*",
+        "com.ccb.*",
+        "com.abchina.*",
+        "cmb.pb",
+        "com.chinamworld.main",
+        "com.unionpay.*"
+    )
+
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         try {
-            if (sbn.isOngoing) return // 忽略正在进行的通知（前台服务等）
+            if (sbn.isOngoing) return
 
             val notification = sbn.notification
             val pkg = sbn.packageName
 
-            // 排除自身通知
             if (pkg == packageName) return
+
+            val isSensitive = sensitivePackages.any { pattern ->
+                if (pattern.contains("*")) {
+                    pkg.startsWith(pattern.removeSuffix("*"))
+                } else {
+                    pkg == pattern
+                }
+            }
 
             val appName = try {
                 val pm = packageManager
@@ -41,9 +63,10 @@ class NotificationListener : NotificationListenerService() {
 
             val extras = notification.extras ?: return
             val title = extras.getString(Notification.EXTRA_TITLE)?.take(200)
-            val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.take(500)
+            val text = if (isSensitive) "[内容已屏蔽]" else {
+                extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.take(500)
+            }
 
-            // 忽略空内容
             if (title == null && text == null) return
 
             try {

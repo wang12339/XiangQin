@@ -1,9 +1,16 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.ksp)
     alias(libs.plugins.kotlin.serialization)
+}
+
+val keystoreProps = Properties().apply {
+    val localProps = rootProject.file("local.properties")
+    if (localProps.exists()) load(localProps.inputStream())
 }
 
 android {
@@ -33,9 +40,9 @@ android {
     signingConfigs {
         create("release") {
             storeFile = file("xiangqin-release.jks")
-            storePassword = "xiangqin123"
+            storePassword = keystoreProps.getProperty("KEYSTORE_PASSWORD", System.getenv("KEYSTORE_PASSWORD") ?: "")
             keyAlias = "xiangqin"
-            keyPassword = "xiangqin123"
+            keyPassword = keystoreProps.getProperty("KEY_PASSWORD", System.getenv("KEY_PASSWORD") ?: "")
         }
     }
 
@@ -104,6 +111,7 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.navigation.compose)
 
     // Room
@@ -117,6 +125,9 @@ dependencies {
 
     // DataStore
     implementation(libs.datastore.preferences)
+
+    // Security (EncryptedSharedPreferences)
+    implementation(libs.androidx.security.crypto)
 
     // WorkManager
     implementation(libs.work.runtime.ktx)
@@ -133,9 +144,9 @@ dependencies {
     implementation(libs.ktor.server.netty)
 
     // Ktor Client (WebSocket relay)
-    implementation("io.ktor:ktor-client-core:2.3.12")
-    implementation("io.ktor:ktor-client-okhttp:2.3.12")
-    implementation("io.ktor:ktor-client-websockets:2.3.12")
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.okhttp)
+    implementation(libs.ktor.client.websockets)
 
     // Vico (Compose charts)
     implementation(libs.vico.compose.m3)

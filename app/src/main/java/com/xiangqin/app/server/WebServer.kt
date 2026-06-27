@@ -8,7 +8,9 @@ import io.ktor.server.engine.*
 import io.ktor.server.netty.*
 import io.ktor.server.plugins.*
 import io.ktor.server.plugins.contentnegotiation.*
+import io.ktor.server.plugins.cors.routing.*
 import io.ktor.server.plugins.statuspages.*
+import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
@@ -27,16 +29,26 @@ class WebServer(private val context: Context, private val service: MonitoringSer
 
         val app = XiangQinApp.instance
         auth = AuthModule(app)
-        val port = 8080
+        val port = app.dataStore.getWebPort()
 
         server = embeddedServer(Netty, port = port) {
             install(ContentNegotiation) { json(json) }
             install(WebSockets)
+            install(CORS) {
+                allowHost("xiangqin-test.whanghui.top", schemes = listOf("https"))
+                allowHost("xiangqin.whanghui.top", schemes = listOf("https"))
+                allowHost("localhost")
+                allowHost("127.0.0.1")
+                allowHeader(HttpHeaders.ContentType)
+                allowHeader(HttpHeaders.Authorization)
+                allowCredentials = true
+                maxAgeInSeconds = 3600
+            }
             install(StatusPages) {
                 exception<Throwable> { call, cause ->
-                    val safeMsg = escapedJson(cause.message ?: "unknown")
+                    android.util.Log.e("XiangQin/Web", "未处理异常", cause)
                     call.respondText(
-                        """{"error":"$safeMsg"}""",
+                        """{"error":"服务器内部错误"}""",
                         ContentType.Application.Json,
                         HttpStatusCode.InternalServerError
                     )
@@ -51,6 +63,80 @@ class WebServer(private val context: Context, private val service: MonitoringSer
             }
 
             routing {
+                post("/api/login") {
+                    val clientIp = call.request.local.remoteAddress
+
+                    // 检查是否被限流
+                    if (auth.isLockedOut(clientIp)) {
+                        call.respondText(
+                            """{"error":"too many attempts, try again later"}""",
+                            ContentType.Application.Json,
+                            HttpStatusCode.TooManyRequests
+                        )
+                        return@post
+                    }
+
+                    val body = call.receiveText()
+
+                    // 验证请求体大小
+                    if (body.length > 1024) {
+                        call.respondText(
+                            """{"error":"request too large"}""",
+                            ContentType.Application.Json,
+                            HttpStatusCode.PayloadTooLarge
+                        )
+                        return@post
+                    }
+
+                    val pw = try {
+                        val obj = org.json.JSONObject(body)
+                        val password = obj.optString("password", "")
+                        // 验证密码字段存在且非空
+                        if (password.isEmpty()) {
+                            call.respondText(
+                                """{"error":"password is required"}""",
+                                ContentType.Application.Json,
+                                HttpStatusCode.BadRequest
+                            )
+                            return@post
+                        }
+                        // 验证密码长度合理性（最大 128 字符）
+                        if (password.length > 128) {
+                            call.respondText(
+                                """{"error":"password too long"}""",
+                                ContentType.Application.Json,
+                                HttpStatusCode.BadRequest
+                            )
+                            return@post
+                        }
+                        password
+                    } catch (e: Exception) {
+                        android.util.Log.w("XiangQin/Web", "LOGIN parse error: ${e.message}")
+                        call.respondText(
+                            """{"error":"invalid request format"}""",
+                            ContentType.Application.Json,
+                            HttpStatusCode.BadRequest
+                        )
+                        return@post
+                    }
+
+                    val correctPw = app.dataStore.getWebPassword()
+                    if (java.security.MessageDigest.isEqual(pw.toByteArray(), correctPw.toByteArray())) {
+                        auth.clearFailedLogin(clientIp)
+                        val token = auth.createSession()
+                        call.respondText(
+                            """{"token":"${token.escapeJson()}","message":"ok"}""",
+                            ContentType.Application.Json
+                        )
+                    } else {
+                        auth.recordFailedLogin(clientIp)
+                        call.respondText(
+                            """{"error":"wrong password"}""",
+                            ContentType.Application.Json,
+                            HttpStatusCode.Unauthorized
+                        )
+                    }
+                }
                 staticRoutes(app, context)
                 dataRoutes(app, context, auth)
                 deviceRoutes(app, context, service, auth)

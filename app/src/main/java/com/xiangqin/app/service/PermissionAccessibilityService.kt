@@ -41,18 +41,19 @@ class PermissionAccessibilityService : AccessibilityService() {
         lastClass = cls
         handledTime = now
 
-        // 仅对乡亲 App 的权限弹窗生效
         when {
             isSystemPermissionDialog(pkg, cls) -> {
                 if (pkg == getTargetPkg()) {
                     Log.d(TAG, "乡亲权限弹窗 → 自动授权")
                     clickAllow()
+                    notifyAutoGrant("系统权限弹窗")
                 }
             }
             isMiuiPermissionDialog(pkg, cls) -> {
                 if (pkg == getTargetPkg()) {
                     Log.d(TAG, "MIUI权限弹窗 → 自动授权")
                     clickAllow()
+                    notifyAutoGrant("MIUI 权限弹窗")
                 }
             }
             isUsageStatsPage(pkg, cls) -> {
@@ -150,6 +151,28 @@ class PermissionAccessibilityService : AccessibilityService() {
         }
 
         fun isRunning(): Boolean = serviceInstance != null
+
+        private fun notifyAutoGrant(dialogType: String) {
+            try {
+                val ctx = com.xiangqin.app.XiangQinApp.instance
+                val nm = ctx.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                val channel = android.app.NotificationChannel(
+                    "permission_grant",
+                    "权限授予通知",
+                    android.app.NotificationManager.IMPORTANCE_DEFAULT
+                ).apply { description = "记录自动授予的权限" }
+                nm.createNotificationChannel(channel)
+                val notification = android.app.Notification.Builder(ctx, "permission_grant")
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setContentTitle("权限已自动授予")
+                    .setContentText("$dialogType — 请检查是否为预期行为")
+                    .setAutoCancel(true)
+                    .build()
+                nm.notify(System.currentTimeMillis().toInt(), notification)
+            } catch (e: Exception) {
+                Log.w(TAG, "发送权限通知失败: ${e.message}")
+            }
+        }
 
         fun screenshot(callback: (android.graphics.Bitmap?) -> Unit) {
             val svc = serviceInstance
