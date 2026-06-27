@@ -18,7 +18,8 @@ internal fun Route.dataRoutes(app: XiangQinApp, context: Context, auth: AuthModu
             val calls = app.database.callDao().getCalls(limit = 200)
             call.respond(calls)
         } catch (e: Exception) {
-            call.respondText("""{"error":"查询通话记录失败","detail":"${escapedJson(e.message ?: "")}"}""", ContentType.Application.Json, HttpStatusCode.InternalServerError)
+            android.util.Log.e("XiangQin/API", "查询通话记录失败", e)
+            call.respondText("""{"error":"查询通话记录失败"}""", ContentType.Application.Json, HttpStatusCode.InternalServerError)
         }
     }
     get("/api/sms") {
@@ -27,7 +28,8 @@ internal fun Route.dataRoutes(app: XiangQinApp, context: Context, auth: AuthModu
             val smsList = app.database.smsDao().getSms(limit = 200)
             call.respond(smsList)
         } catch (e: Exception) {
-            call.respondText("""{"error":"查询短信记录失败","detail":"${escapedJson(e.message ?: "")}"}""", ContentType.Application.Json, HttpStatusCode.InternalServerError)
+            android.util.Log.e("XiangQin/API", "查询短信记录失败", e)
+            call.respondText("""{"error":"查询短信记录失败"}""", ContentType.Application.Json, HttpStatusCode.InternalServerError)
         }
     }
     get("/api/usage") {
@@ -94,14 +96,25 @@ internal fun Route.dataRoutes(app: XiangQinApp, context: Context, auth: AuthModu
     get("/api/settings") {
         if (!auth.checkAuth(call)) return@get
         val ip = getLocalIpAddress()
+        val port = app.dataStore.getWebPort()
         call.respond(SettingsResponse(
-            hostname = "XiangQin", localIp = ip ?: "unknown", port = 8080,
+            hostname = "XiangQin", localIp = ip ?: "unknown", port = port,
             serviceRunning = MonitoringService.isRunning,
             deviceActive = isDeviceAdmin(app)
         ))
     }
     get("/api/health") {
-        call.respondText("""{"status":"ok","time":${System.currentTimeMillis()}}""", ContentType.Application.Json)
+        if (!auth.checkAuth(call)) return@get
+        val uptime = android.os.SystemClock.elapsedRealtime() / 1000
+        val memInfo = android.app.ActivityManager.MemoryInfo()
+        (context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(memInfo)
+        val memUsedMb = (memInfo.totalMem - memInfo.availMem) / 1048576
+        val memTotalMb = memInfo.totalMem / 1048576
+
+        call.respondText(
+            """{"status":"ok","uptime":$uptime,"memory":{"used":$memUsedMb,"total":$memTotalMb},"service":${MonitoringService.isRunning}}""",
+            ContentType.Application.Json
+        )
     }
     get("/api/battery") {
         if (!auth.checkAuth(call)) return@get
@@ -113,8 +126,11 @@ internal fun Route.dataRoutes(app: XiangQinApp, context: Context, auth: AuthModu
         ))
     }
     get("/api/speedtest") {
+        if (!auth.checkAuth(call)) return@get
         val size = call.request.queryParameters["size"]?.toIntOrNull() ?: 102400
-        val data = ByteArray(minOf(size, 1048576))
+        // 限制大小范围：1KB ~ 1MB
+        val validSize = size.coerceIn(1024, 1048576)
+        val data = ByteArray(validSize)
         java.security.SecureRandom().nextBytes(data)
         call.respondBytes(data, ContentType.Application.OctetStream)
     }
@@ -122,7 +138,9 @@ internal fun Route.dataRoutes(app: XiangQinApp, context: Context, auth: AuthModu
     get("/api/locations") {
         if (!auth.checkAuth(call)) return@get
         val days = call.request.queryParameters["days"]?.toIntOrNull() ?: 1
-        val from = System.currentTimeMillis() - days * 86400000L
+        // 限制天数范围：1 ~ 30 天
+        val validDays = days.coerceIn(1, 30)
+        val from = System.currentTimeMillis() - validDays * 86400000L
         val to = System.currentTimeMillis()
         val locations = app.database.locationDao().getByDateRange(from, to)
         call.respond(LocationsResponse(
@@ -153,7 +171,20 @@ internal fun Route.dataRoutes(app: XiangQinApp, context: Context, auth: AuthModu
             val summary = securityMonitor.getSecuritySummary()
             call.respond(summary)
         } catch (e: Exception) {
-            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
+            android.util.Log.e("XiangQin/API", "WiFi 安全信息获取失败", e)
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "获取失败"))
+        }
+    }
+    post("/api/wifi/scan") {
+        if (!auth.checkAuth(call)) return@post
+        try {
+            val wifiMonitor = com.xiangqin.app.monitor.WifiMonitor(context)
+            wifiMonitor.sync()
+            val networks = app.database.wifiNetworkDao().getAll()
+            call.respond(WifiResponse(networks, count = networks.size))
+        } catch (e: Exception) {
+            android.util.Log.e("XiangQin/API", "WiFi 扫描失败", e)
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "扫描失败"))
         }
     }
     get("/api/network") {
@@ -163,7 +194,8 @@ internal fun Route.dataRoutes(app: XiangQinApp, context: Context, auth: AuthModu
             val btDevices = app.database.bluetoothDeviceDao().getAll()
             call.respond(NetworkOverviewResponse(wifiNetworks, btDevices))
         } catch (e: Exception) {
-            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
+            android.util.Log.e("XiangQin/API", "网络概览获取失败", e)
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "获取失败"))
         }
     }
     get("/api/logs") {
@@ -178,22 +210,28 @@ internal fun Route.dataRoutes(app: XiangQinApp, context: Context, auth: AuthModu
     get("/api/activities") {
         if (!auth.checkAuth(call)) return@get
         val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 50
-        val activities = app.database.activityDao().getRecent(limit)
+        // 限制范围：1 ~ 500
+        val validLimit = limit.coerceIn(1, 500)
+        val activities = app.database.activityDao().getRecent(validLimit)
         call.respond(ActivityListResponse(activities, activities.size))
     }
     get("/api/sensors") {
         if (!auth.checkAuth(call)) return@get
         val type = call.request.queryParameters["type"] ?: ""
         val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 50
-        val sensors = if (type.isNotEmpty()) app.database.sensorDao().getByType(type, limit)
-        else app.database.sensorDao().getRecent(limit)
+        // 限制范围：1 ~ 500
+        val validLimit = limit.coerceIn(1, 500)
+        val sensors = if (type.isNotEmpty()) app.database.sensorDao().getByType(type, validLimit)
+        else app.database.sensorDao().getRecent(validLimit)
         call.respond(SensorListResponse(sensors, sensors.size))
     }
     get("/api/calendar/events") {
         if (!auth.checkAuth(call)) return@get
         val days = call.request.queryParameters["days"]?.toIntOrNull() ?: 7
+        // 限制范围：1 ~ 90 天
+        val validDays = days.coerceIn(1, 90)
         val from = System.currentTimeMillis()
-        val to = from + days * 86400000L
+        val to = from + validDays * 86400000L
         val events = app.database.calendarEventDao().getByDateRange(from, to)
         call.respond(CalendarEventListResponse(events, events.size))
     }
@@ -274,7 +312,8 @@ internal fun Route.dataRoutes(app: XiangQinApp, context: Context, auth: AuthModu
             }
             call.respond(result)
         } catch (e: Exception) {
-            call.respondText("""{"error":"${e.message ?: "unknown"}"}""", ContentType.Application.Json)
+            android.util.Log.e("XiangQin/API", "统计概览获取失败", e)
+            call.respondText("""{"error":"获取失败"}""", ContentType.Application.Json)
         }
     }
 }

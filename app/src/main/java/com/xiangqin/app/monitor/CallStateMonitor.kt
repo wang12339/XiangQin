@@ -37,6 +37,7 @@ class CallStateMonitor(private val context: Context) {
     private var lastNumber: String? = null
     private var callStartTime: Long = 0
     private var ringingStartTime: Long = 0
+    private var wasIncoming = false
     private var registered = false
 
     private val telephonyManager: TelephonyManager?
@@ -102,13 +103,15 @@ class CallStateMonitor(private val context: Context) {
                 if (callStartTime > 0) {
                     val duration = (now - callStartTime) / 1000
                     if (duration > 0) {
+                        val callType = if (wasIncoming) 1 else 2
                         scope.launch {
-                            saveCall(number, 2 /* outgoing */, duration.toInt(), callStartTime)
+                            saveCall(number, callType, duration.toInt(), callStartTime)
                         }
                     }
                     callStartTime = 0
                 }
                 ringingStartTime = 0
+                wasIncoming = false
             }
             CALL_STATE_RINGING -> {
                 // 来电响铃
@@ -119,6 +122,7 @@ class CallStateMonitor(private val context: Context) {
                 if (ringingStartTime > 0) {
                     // 来电接通
                     callStartTime = now
+                    wasIncoming = true
                     scope.launch {
                         saveCall(number, 1 /* incoming */, 0, now)
                     }
@@ -126,6 +130,7 @@ class CallStateMonitor(private val context: Context) {
                 } else if (callStartTime == 0L) {
                     // 去电接通（PROCESS_OUTGOING_CALLS 广播会先触发）
                     callStartTime = now
+                    wasIncoming = false
                 }
             }
         }

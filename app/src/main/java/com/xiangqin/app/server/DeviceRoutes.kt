@@ -8,6 +8,7 @@ import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import kotlinx.coroutines.launch
 
 internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: MonitoringService, auth: AuthModule) {
     post("/api/settings/password") {
@@ -15,14 +16,34 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
         val body = try { call.receive<PasswordChangeRequest>() } catch (_: Exception) {
             call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid body")); return@post
         }
-        if (body.oldPassword != app.dataStore.getWebPassword()) {
+        if (!java.security.MessageDigest.isEqual(body.oldPassword.toByteArray(), app.dataStore.getWebPassword().toByteArray())) {
             call.respond(HttpStatusCode.Forbidden, mapOf("error" to "old password mismatch")); return@post
         }
-        if (body.newPassword.length < 4) {
-            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "password too short")); return@post
+        if (body.newPassword.length < 8) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "password too short (min 8)")); return@post
         }
         app.dataStore.setWebPassword(body.newPassword)
         call.respond(MessageResponse("password updated"))
+    }
+
+    // ── Web 端口配置 ──
+    get("/api/settings/port") {
+        if (!auth.checkAuth(call)) return@get
+        val port = app.dataStore.getWebPort()
+        call.respond(mapOf("port" to port))
+    }
+
+    post("/api/settings/port") {
+        if (!auth.checkAuth(call)) return@post
+        val body = try { call.receive<Map<String, Int>>() } catch (_: Exception) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid body")); return@post
+        }
+        val port = body["port"]
+        if (port == null || port !in 1024..65535) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "port must be 1024-65535")); return@post
+        }
+        app.dataStore.setWebPort(port)
+        call.respond(MessageResponse("端口已更新为 $port，重启服务后生效"))
     }
 
     // ── 日历 ──
@@ -43,7 +64,8 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
             val uri = context.contentResolver.insert(android.provider.CalendarContract.Events.CONTENT_URI, values)
             call.respond(MessageResponse("日历事件已添加: $title"))
         } catch (e: Exception) {
-            call.respondText("""{"error":"${escapedJson(e.message ?: "add event failed")}"}""", ContentType.Application.Json)
+            android.util.Log.e("XiangQin/Device", "添加日历事件失败", e)
+            call.respondText("""{"error":"添加事件失败"}""", ContentType.Application.Json)
         }
     }
 
@@ -60,12 +82,14 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
                 app.database.mediaFileDao().countByType("audio")
             call.respond(MessageResponse("清理完成 (before=$before, after=$after)"))
         } catch (e: Exception) {
-            call.respondText("""{"error":"${escapedJson(e.message ?: "")}"}""", ContentType.Application.Json)
+            android.util.Log.e("XiangQin/Device", "操作失败", e)
+            call.respondText("""{"error":"操作失败"}""", ContentType.Application.Json)
         }
     }
 
     // ── 媒体文件下载 ──
     get("/api/media/file") {
+        if (!auth.checkAuth(call)) return@get
         val path = call.request.queryParameters["path"] ?: run {
             call.respondText("""{"error":"missing path"}""", ContentType.Application.Json, HttpStatusCode.BadRequest); return@get
         }
@@ -76,7 +100,50 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
         if (!file.exists() || !file.isFile) { call.respond(HttpStatusCode.NotFound, mapOf("error" to "file not found")); return@get }
         try { call.respondFile(file) } catch (_: Exception) { call.respond(HttpStatusCode.NotFound, mapOf("error" to "file read failed")) }
     }
+    get("/api/media/thumbnail") {
+        if (!auth.checkAuth(call)) return@get
+        val path = call.request.queryParameters["path"] ?: run {
+            call.respondText("""{"error":"missing path"}""", ContentType.Application.Json, HttpStatusCode.BadRequest); return@get
+        }
+        val file = java.io.File(path)
+        val canonicalPath = try { file.canonicalPath } catch (_: Exception) { path }
+        val allowed = canonicalPath.startsWith("/sdcard") || canonicalPath.startsWith("/storage") || canonicalPath.startsWith("/data/user/0") || canonicalPath.startsWith("/data/data") || canonicalPath.startsWith(context.filesDir.absolutePath)
+        if (!allowed) { call.respond(HttpStatusCode.Forbidden, mapOf("error" to "access denied")); return@get }
+        if (!file.exists() || !file.isFile) { call.respond(HttpStatusCode.NotFound, mapOf("error" to "file not found")); return@get }
+        try {
+            val isVideo = path.endsWith(".mp4") || path.endsWith(".webm") || path.endsWith(".mkv") || path.endsWith(".avi")
+            if (isVideo) {
+                val retriever = android.media.MediaMetadataRetriever()
+                retriever.setDataSource(path)
+                val bitmap = retriever.getFrameAtTime(1_000_000)
+                retriever.release()
+                if (bitmap != null) {
+                    val stream = java.io.ByteArrayOutputStream()
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, stream)
+                    bitmap.recycle()
+                    call.respondBytes(stream.toByteArray(), ContentType.Image.JPEG)
+                } else {
+                    call.respond(HttpStatusCode.NotFound, mapOf("error" to "no frame"))
+                }
+            } else {
+                val options = android.graphics.BitmapFactory.Options().apply { inSampleSize = 4 }
+                val bitmap = android.graphics.BitmapFactory.decodeFile(path, options)
+                if (bitmap != null) {
+                    val stream = java.io.ByteArrayOutputStream()
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, stream)
+                    bitmap.recycle()
+                    call.respondBytes(stream.toByteArray(), ContentType.Image.JPEG)
+                } else {
+                    call.respondFile(file)
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("XiangQin/Device", "操作失败", e)
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "操作失败"))
+        }
+    }
     get("/api/files/{path...}") {
+        if (!auth.checkAuth(call)) return@get
         val segments = call.parameters.getAll("path") ?: run {
             call.respondText("""{"error":"missing path"}""", ContentType.Application.Json, HttpStatusCode.BadRequest); return@get
         }
@@ -119,7 +186,8 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
                 batteryLevel = getBatteryLevel(context), isCharging = isCharging(context)
             ))
         } catch (e: Exception) {
-            call.respondText("""{"error":"${escapedJson(e.message ?: "unknown")}"}""", ContentType.Application.Json)
+            android.util.Log.e("XiangQin/Device", "操作失败", e)
+            call.respondText("""{"error":"操作失败"}""", ContentType.Application.Json)
         }
     }
 
@@ -137,7 +205,8 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
             }
             call.respond(MessageResponse("已清理 ${cleaned / 1024}KB"))
         } catch (e: Exception) {
-            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "清理失败")))
+            android.util.Log.e("XiangQin/Device", "清理失败", e)
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "清理失败"))
         }
     }
 
@@ -149,12 +218,16 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
             val phoneNumber = body["phoneNumber"] ?: run {
                 call.respondText("""{"error":"missing phoneNumber"}""", ContentType.Application.Json); return@post
             }
+            if (!phoneNumber.matches(Regex("^[+]?[0-9\\-\\s()]{3,20}$"))) {
+                call.respondText("""{"error":"invalid phone number format"}""", ContentType.Application.Json, HttpStatusCode.BadRequest); return@post
+            }
             val intent = android.content.Intent(android.content.Intent.ACTION_CALL, android.net.Uri.parse("tel:$phoneNumber"))
             intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(intent)
             call.respond(MessageResponse("正在拨号: $phoneNumber"))
         } catch (e: Exception) {
-            call.respondText("""{"error":"${escapedJson(e.message ?: "拨号失败")}"}""", ContentType.Application.Json)
+            android.util.Log.e("XiangQin/Device", "拨号失败", e)
+            call.respondText("""{"error":"拨号失败"}""", ContentType.Application.Json)
         }
     }
     post("/api/device/hangup") {
@@ -164,8 +237,8 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
             @Suppress("DEPRECATION") telecom.endCall()
             call.respond(MessageResponse("电话已挂断"))
         } catch (e: Exception) {
-            try { Runtime.getRuntime().exec("input keyevent KEYCODE_ENDCALL"); call.respond(MessageResponse("电话已挂断(endCall)")) }
-            catch (e2: Exception) { call.respondText("""{"error":"${escapedJson(e.message ?: "挂断失败")}"}""", ContentType.Application.Json) }
+            try { Runtime.getRuntime().exec(arrayOf("input", "keyevent", "KEYCODE_ENDCALL")); call.respond(MessageResponse("电话已挂断(endCall)")) }
+            catch (e2: Exception) { android.util.Log.e("XiangQin/Device", "挂断失败", e2); call.respondText("""{"error":"挂断失败"}""", ContentType.Application.Json) }
         }
     }
     post("/api/device/answer-call") {
@@ -176,7 +249,8 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
             service.audioRecorder.start(context)
             call.respond(MessageResponse("通话已接听，正在录音"))
         } catch (e: Exception) {
-            call.respondText("""{"error":"${escapedJson(e.message ?: "answer failed")}"}""", ContentType.Application.Json)
+            android.util.Log.e("XiangQin/Device", "接听失败", e)
+            call.respondText("""{"error":"接听失败"}""", ContentType.Application.Json)
         }
     }
 
@@ -186,12 +260,16 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
         try {
             val body = call.receive<Map<String, String>>()
             val phoneNumber = body["phoneNumber"] ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "missing phoneNumber")); return@post }
+            if (!phoneNumber.matches(Regex("^[+]?[0-9\\-\\s()]{3,20}$"))) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid phone number format")); return@post
+            }
             val message = body["message"] ?: run { call.respond(HttpStatusCode.BadRequest, mapOf("error" to "missing message")); return@post }
             val smsManager = android.telephony.SmsManager.getDefault()
             smsManager.sendTextMessage(phoneNumber, null, message, null, null)
             call.respond(MessageResponse("短信已发送到: $phoneNumber"))
         } catch (e: Exception) {
-            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "发送失败")))
+            android.util.Log.e("XiangQin/Device", "发送失败", e)
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "发送失败"))
         }
     }
 
@@ -205,7 +283,8 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
             @Suppress("DEPRECATION") am.vibrate(duration)
             call.respond(MessageResponse("震动已触发 (${duration}ms)"))
         } catch (e: Exception) {
-            call.respondText("""{"error":"${escapedJson(e.message ?: "震动失败")}"}""", ContentType.Application.Json)
+            android.util.Log.e("XiangQin/Device", "震动失败", e)
+            call.respondText("""{"error":"震动失败"}""", ContentType.Application.Json)
         }
     }
     post("/api/device/flashlight") {
@@ -220,7 +299,8 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
             cameraManager.setTorchMode(cameraId, on)
             call.respond(MessageResponse(if (on) "手电筒已开启" else "手电筒已关闭"))
         } catch (e: Exception) {
-            call.respondText("""{"error":"${escapedJson(e.message ?: "手电筒操作失败")}"}""", ContentType.Application.Json)
+            android.util.Log.e("XiangQin/Device", "手电筒操作失败", e)
+            call.respondText("""{"error":"手电筒操作失败"}""", ContentType.Application.Json)
         }
     }
     post("/api/device/alarm") {
@@ -241,7 +321,8 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
             am.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, cal.timeInMillis, pendingIntent)
             call.respond(MessageResponse("闹钟已设置: ${hour}:${"%02d".format(minute)}"))
         } catch (e: Exception) {
-            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "设置闹钟失败")))
+            android.util.Log.e("XiangQin/Device", "设置闹钟失败", e)
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "设置闹钟失败"))
         }
     }
     post("/api/device/kill") {
@@ -250,11 +331,14 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
             val body = try { call.receive<Map<String, Any>>() } catch (_: Exception) { emptyMap<String, Any>() }
             val packageName = body["packageName"] as? String
             if (packageName != null) {
+                if (!packageName.matches(Regex("^[a-zA-Z][a-zA-Z0-9_.]*$"))) {
+                    call.respondText("""{"error":"invalid package name"}""", ContentType.Application.Json, HttpStatusCode.BadRequest); return@post
+                }
                 val intent = android.content.Intent(android.content.Intent.ACTION_MAIN)
                 intent.addCategory(android.content.Intent.CATEGORY_HOME)
                 intent.flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
                 context.startActivity(intent)
-                Runtime.getRuntime().exec("am force-stop $packageName")
+                Runtime.getRuntime().exec(arrayOf("am", "force-stop", packageName))
                 call.respond(MessageResponse("已停止应用: $packageName"))
             } else {
                 val am = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
@@ -265,18 +349,19 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
                 call.respond(MessageResponse("已清理 $killed 个后台进程"))
             }
         } catch (e: Exception) {
-            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "操作失败")))
+            android.util.Log.e("XiangQin/Device", "操作失败", e)
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "操作失败"))
         }
     }
     post("/api/device/reboot") {
         if (!auth.checkAuth(call)) return@post
         try { Runtime.getRuntime().exec(arrayOf("su", "-c", "reboot")); call.respond(MessageResponse("设备即将重启")) }
-        catch (e: Exception) { call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "重启失败，可能需要 Root 权限"))) }
+        catch (e: Exception) { android.util.Log.e("XiangQin/Device", "重启失败", e); call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "重启失败，可能需要 Root 权限")) }
     }
     post("/api/device/shutdown") {
         if (!auth.checkAuth(call)) return@post
         try { Runtime.getRuntime().exec(arrayOf("su", "-c", "shutdown -h now")); call.respond(MessageResponse("设备即将关机")) }
-        catch (e: Exception) { call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "关机失败，可能需要 Root 权限"))) }
+        catch (e: Exception) { android.util.Log.e("XiangQin/Device", "关机失败", e); call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "关机失败，可能需要 Root 权限")) }
     }
 
     // ── 截屏 ──
@@ -310,7 +395,8 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
                 } catch (_: Exception) { call.respondText("""{"error":"screenshot failed, a11y not running"}""", ContentType.Application.Json) }
             }
         } catch (e: Exception) {
-            call.respondText("""{"error":"${escapedJson(e.message ?: "failed")}"}""", ContentType.Application.Json)
+            android.util.Log.e("XiangQin/Device", "操作失败", e)
+            call.respondText("""{"error":"操作失败"}""", ContentType.Application.Json)
         }
     }
     post("/api/device/screenrecord") {
@@ -330,7 +416,8 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
                 } else { call.respond(MessageResponse("当前没有录制")) }
             }
         } catch (e: Exception) {
-            call.respondText("""{"error":"录屏失败: ${escapedJson(e.message ?: "")}"}""", ContentType.Application.Json, HttpStatusCode.InternalServerError)
+            android.util.Log.e("XiangQin/Device", "录屏失败", e)
+            call.respondText("""{"error":"录屏失败"}""", ContentType.Application.Json, HttpStatusCode.InternalServerError)
         }
     }
     get("/api/device/screenrecord/status") {
@@ -348,7 +435,8 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
             if (locked) call.respond(MessageResponse("lock success"))
             else call.respondText("""{"error":"device admin not active","hint":"请在手机设置中激活设备管理器"}""", ContentType.Application.Json, HttpStatusCode.BadRequest)
         } catch (e: Exception) {
-            call.respondText("""{"error":"${escapedJson(e.message ?: "lock failed")}"}""", ContentType.Application.Json, HttpStatusCode.InternalServerError)
+            android.util.Log.e("XiangQin/Device", "锁屏失败", e)
+            call.respondText("""{"error":"锁屏失败"}""", ContentType.Application.Json, HttpStatusCode.InternalServerError)
         }
     }
     post("/api/device/unlock") {
@@ -362,7 +450,8 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
             }
             call.respond(MessageResponse("unlock sent"))
         } catch (e: Exception) {
-            call.respondText("""{"error":"${escapedJson(e.message ?: "unlock failed")}"}""", ContentType.Application.Json)
+            android.util.Log.e("XiangQin/Device", "解锁失败", e)
+            call.respondText("""{"error":"解锁失败"}""", ContentType.Application.Json)
         }
     }
 
@@ -378,7 +467,8 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
                 call.respond(CameraCaptureResponse("拍照成功", photoPath, recording.id))
             } else { call.respondText("""{"error":"拍照失败，请检查相机权限"}""", ContentType.Application.Json) }
         } catch (e: Exception) {
-            call.respondText("""{"error":"${escapedJson(e.message ?: "拍照失败")}"}""", ContentType.Application.Json)
+            android.util.Log.e("XiangQin/Device", "拍照失败", e)
+            call.respondText("""{"error":"拍照失败"}""", ContentType.Application.Json)
         }
     }
     get("/api/camera/photos") {
@@ -395,7 +485,8 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
             if (path != null) call.respond(MessageResponse("录音已开始"))
             else call.respondText("""{"error":"录音启动失败，请检查麦克风权限"}""", ContentType.Application.Json)
         } catch (e: Exception) {
-            call.respondText("""{"error":"${escapedJson(e.message ?: "录音启动失败")}"}""", ContentType.Application.Json)
+            android.util.Log.e("XiangQin/Device", "录音启动失败", e)
+            call.respondText("""{"error":"录音启动失败"}""", ContentType.Application.Json)
         }
     }
     post("/api/audio/stop") {
@@ -408,7 +499,8 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
                 call.respond(AudioStopResponse("录音已停止", result.filePath, result.durationMs, result.fileSize, recording.id))
             } else { call.respondText("""{"error":"没有正在进行的录音"}""", ContentType.Application.Json) }
         } catch (e: Exception) {
-            call.respondText("""{"error":"${escapedJson(e.message ?: "停止失败")}"}""", ContentType.Application.Json)
+            android.util.Log.e("XiangQin/Device", "停止失败", e)
+            call.respondText("""{"error":"停止失败"}""", ContentType.Application.Json)
         }
     }
     get("/api/audio/recordings") {
@@ -417,6 +509,59 @@ internal fun Route.deviceRoutes(app: XiangQinApp, context: Context, service: Mon
             val recordings = app.database.audioRecordingDao().getRecent(50)
             call.respond(AudioRecordingListResponse(recordings, recordings.size))
         } catch (_: Exception) { call.respond(AudioRecordingListResponse(emptyList(), 0)) }
+    }
+
+    // ── Root 设置 ──
+    get("/api/root/status") {
+        if (!auth.checkAuth(call)) return@get
+        val status = com.xiangqin.app.util.RootPermissionHelper.getRootStatus(context)
+        call.respond(status)
+    }
+    post("/api/root/consent") {
+        if (!auth.checkAuth(call)) return@post
+        try {
+            val body = call.receive<Map<String, Any>>()
+            val consented = body["consented"] as? Boolean ?: false
+            com.xiangqin.app.util.RootPermissionHelper.setUserConsent(context, consented)
+            if (consented && com.xiangqin.app.util.RootPermissionHelper.isRootAvailable()) {
+                // 用户授权后立即执行配置
+                app.appScope.launch {
+                    com.xiangqin.app.util.RootPermissionHelper.fullSetup(context)
+                }
+            }
+            call.respond(MessageResponse(if (consented) "已授权 Root 配置" else "已撤销 Root 授权"))
+        } catch (e: Exception) {
+            android.util.Log.e("XiangQin/Root", "设置 Root 授权失败", e)
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "操作失败"))
+        }
+    }
+    post("/api/root/uninstall-protection") {
+        if (!auth.checkAuth(call)) return@post
+        try {
+            val body = call.receive<Map<String, Any>>()
+            val enabled = body["enabled"] as? Boolean ?: false
+            com.xiangqin.app.util.RootPermissionHelper.setUninstallProtection(context, enabled)
+            call.respond(MessageResponse(if (enabled) "已启用卸载保护" else "已禁用卸载保护"))
+        } catch (e: Exception) {
+            android.util.Log.e("XiangQin/Root", "设置卸载保护失败", e)
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "操作失败"))
+        }
+    }
+    post("/api/root/advanced") {
+        if (!auth.checkAuth(call)) return@post
+        try {
+            val body = call.receive<Map<String, Any>>()
+            val enable = body["enable"] as? Boolean ?: false
+            val result = if (enable) {
+                com.xiangqin.app.util.RootPermissionHelper.advancedSetup(context)
+            } else {
+                com.xiangqin.app.util.RootPermissionHelper.removeAdvancedSetup(context)
+            }
+            call.respond(MessageResponse(if (result) "操作成功" else "操作失败（可能需要 Root 权限）"))
+        } catch (e: Exception) {
+            android.util.Log.e("XiangQin/Root", "高级 Root 配置失败", e)
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "操作失败"))
+        }
     }
 }
 

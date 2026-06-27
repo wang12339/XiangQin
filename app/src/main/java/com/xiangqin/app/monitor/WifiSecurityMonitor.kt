@@ -148,12 +148,12 @@ class WifiSecurityMonitor(private val context: Context) {
         val secType = net.securityType ?: ""
 
         // 1. 开放网络 = HIGH
-        if (secType == "Open" || secType == "WEP") {
+        if (secType == "Open") {
             risks.add("🔓 未加密网络，通信可被监听")
             return "HIGH" to risks.joinToString("；")
         }
 
-        // 2. WEP = HIGH (已经被破解的加密)
+        // 2. WEP = CRITICAL (已经被破解的加密)
         if (secType == "WEP") {
             risks.add("⚠️ WEP 加密极不安全，建议升级")
             return "CRITICAL" to risks.joinToString("；")
